@@ -46,6 +46,10 @@ export default function ChatRoom({ username }: Props) {
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4 bg-zinc-50 dark:bg-zinc-950">
+      {/* Unconditionally mount the audio element to prevent React race conditions during WebRTC negotiation */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio ref={webrtc.remoteAudioRef} autoPlay className="hidden" />
+
       <Card className="w-full max-w-md shadow-xl border-zinc-200 dark:border-zinc-800 relative overflow-visible">
         {/* Header */}
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

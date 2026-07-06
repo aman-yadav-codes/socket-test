@@ -36,10 +36,6 @@ export default function ActiveCallWidget({ name, isMuted, onToggleMute, onEndCal
 
   return (
     <>
-      {/* Hidden audio element — remote stream plays through here */}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={remoteAudioRef} autoPlay style={{ display: "none" }} />
-
       <div
         onMouseEnter={() => setExpanded(true)}
         onMouseLeave={() => setExpanded(false)}

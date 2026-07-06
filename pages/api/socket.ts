@@ -62,6 +62,24 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIO) => {
         socket.broadcast.emit("receive-message", { text: msg, sender: username });
       });
 
+      // ── WebRTC signaling relay ──────────────────────────────────────────────
+      socket.on("call-user", ({ to, offer }) => {
+        io.to(to).emit("incoming-call", { from: socket.id, fromUsername: username, offer });
+      });
+      socket.on("call-answer", ({ to, answer }) => {
+        io.to(to).emit("call-answered", { from: socket.id, answer });
+      });
+      socket.on("call-rejected", ({ to }) => {
+        io.to(to).emit("call-rejected", { from: socket.id });
+      });
+      socket.on("call-ended", ({ to }) => {
+        io.to(to).emit("call-ended", { from: socket.id });
+      });
+      socket.on("ice-candidate", ({ to, candidate }) => {
+        io.to(to).emit("ice-candidate", { from: socket.id, candidate });
+      });
+      // ────────────────────────────────────────────────────────────────────────
+
       socket.on("disconnect", () => {
         console.log("Client disconnected:", socket.id, "as", username);
         globalActiveUsers.delete(socket.id);

@@ -51,6 +51,12 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
   const callTargetIdRef = useRef<string>("");
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
+  const callStatusRef = useRef<CallStatus>("idle");
+
+  // Sync callStatusRef with callStatus state to avoid stale closure issues in socket listeners
+  useEffect(() => {
+    callStatusRef.current = callStatus;
+  }, [callStatus]);
 
   // Preload ringtone
   useEffect(() => {
@@ -198,8 +204,8 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     if (!socket) return;
 
     const onIncomingCall = ({ from, fromUsername, offer }: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit }) => {
-      // Ignore if already in a call
-      if (callStatus !== "idle") {
+      // Ignore if already in a call (read from Ref to avoid stale closure)
+      if (callStatusRef.current !== "idle") {
         socket.emit("call-rejected", { to: from });
         return;
       }
