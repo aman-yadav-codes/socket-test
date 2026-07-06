@@ -8,7 +8,7 @@
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useChatCall } from "@/providers/ChatCallProvider";
 import {
   Card,
@@ -32,7 +32,13 @@ interface Props {
 
 export default function ChatRoom({ username }: Props) {
   const { chat, webrtc } = useChatCall();
+  const webrtcRef = useRef(webrtc);
   const [reconnectTarget, setReconnectTarget] = useState<string | null>(null);
+
+  // Sync webrtc state ref to prevent stale closures and premature triggers in layout effects
+  useEffect(() => {
+    webrtcRef.current = webrtc;
+  }, [webrtc]);
 
   // Check if we just disconnected from a call under 5 seconds ago
   useEffect(() => {
@@ -51,28 +57,28 @@ export default function ChatRoom({ username }: Props) {
 
   // Handle page reload/refresh beforeunload: if a call is active/calling, save the target state
   useEffect(() => {
-    if (!webrtc) return;
     const handleUnload = () => {
-      if (webrtc.callStatus === "active" || webrtc.callStatus === "calling") {
-        sessionStorage.setItem("last_call_username", webrtc.callTargetName);
+      const currentWebRTC = webrtcRef.current;
+      if (currentWebRTC && (currentWebRTC.callStatus === "active" || currentWebRTC.callStatus === "calling")) {
+        sessionStorage.setItem("last_call_username", currentWebRTC.callTargetName);
         sessionStorage.setItem("last_call_timestamp", Date.now().toString());
       }
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
-  }, [webrtc]);
+  }, []);
 
   // Handle component unmount (page navigation): if call is active/calling, save target and end call
   useEffect(() => {
-    if (!webrtc) return;
     return () => {
-      if (webrtc.callStatus === "active" || webrtc.callStatus === "calling") {
-        sessionStorage.setItem("last_call_username", webrtc.callTargetName);
+      const currentWebRTC = webrtcRef.current;
+      if (currentWebRTC && (currentWebRTC.callStatus === "active" || currentWebRTC.callStatus === "calling")) {
+        sessionStorage.setItem("last_call_username", currentWebRTC.callTargetName);
         sessionStorage.setItem("last_call_timestamp", Date.now().toString());
-        webrtc.endCall();
+        currentWebRTC.endCall();
       }
     };
-  }, [webrtc]);
+  }, []);
 
   // If layout provider is not initialized yet, show loader or empty
   if (!chat || !webrtc) return null;
