@@ -2,9 +2,14 @@
  * useWebRTC.ts
  * Manages a 1-to-1 voice call using WebRTC, with Socket.IO as the signaling channel.
  *
- * It requests studio-quality 48kHz HD audio constraints, applies noise suppression
- * and echo cancellation, and rewrites SDP profiles to force Opus codec configuration
- * with a high-fidelity 128kbps Constant Bit Rate (CBR) channel.
+ * Updates:
+ *  - Configures studio-grade 48kHz HD audio capture.
+ *  - Rewrites SDP profiles to force high-fidelity Opus encoding at 128kbps Constant Bit Rate
+ *    in "audio" application mode (forcing full-band music/voice profiles instead of dynamic VOIP).
+ *  - Implements a real-time Vocal Equalizer (DSP) on the receiver stream using the Web Audio API:
+ *      1. Highpass filter (< 80Hz) to cut background rumblings and AC hums.
+ *      2. Peaking EQ filter (+3.5dB @ 200Hz) to add warmth and richness to the vocals.
+ *      3. Peaking EQ filter (+4.0dB @ 3000Hz) to boost presence and clarity (crisp speech).
  */
 "use client";
 
@@ -49,16 +54,16 @@ const HD_AUDIO_CONSTRAINTS = {
   autoGainControl: { ideal: true },
   sampleRate: { ideal: 48000 },
   sampleSize: { ideal: 16 },
-  channelCount: { ideal: 1 }, // Mono for high quality low latency voice calls
+  channelCount: { ideal: 1 }, // Mono is optimized for vocal fidelity in voice calls
 };
 
-// ── SDP Opus Bitrate Booster ────────────────────────────────────────────────
-// Forces 128kbps constant bitrate (CBR) stereo/high-def properties on Opus streams
+// ── SDP Opus High-Fidelity Booster ───────────────────────────────────────────
+// Directs Opus to run in high-fidelity full-frequency (48kHz) mode at 128kbps Constant Bit Rate
 function boostAudioBitrate(sdp: string): string {
   let lines = sdp.split("\r\n");
   let opusPayloadType: string | null = null;
 
-  // Locate the Opus payload ID (typically 111)
+  // Find Opus payload ID (typically 111)
   for (const line of lines) {
     if (line.includes("opus/48000")) {
       const match = line.match(/a=rtpmap:(\d+)/);
@@ -71,11 +76,16 @@ function boostAudioBitrate(sdp: string): string {
 
   if (opusPayloadType) {
     lines = lines.map((line) => {
-      // Find the fmtp parameter line for the Opus codec
       if (line.startsWith(`a=fmtp:${opusPayloadType}`)) {
-        // Enforce high audio quality parameters: 128kbps, enable stereo decoding/rendering, enable forward error correction
+        // Enforce high audio quality parameters:
+        // - maxaveragebitrate=128000 (128kbps)
+        // - maxplaybackrate=48000 & sprop-maxcapturerate=48000 (full audio bandwidth)
+        // - stereo=1 & sprop-stereo=1 (enable stereo rendering)
+        // - useinbandfec=1 (forward error correction)
+        // - cbr=1 (constant bit rate mode)
+        // - application=audio (instructs Opus to optimize for general high-fidelity sound rather than aggressive voip compression)
         if (!line.includes("maxaveragebitrate")) {
-          return `${line};maxaveragebitrate=128000;stereo=1;sprop-stereo=1;useinbandfec=1;cbr=1`;
+          return `${line};maxaveragebitrate=128000;maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=1;sprop-stereo=1;useinbandfec=1;cbr=1;application=audio`;
         }
       }
       return line;
@@ -205,12 +215,36 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       try {
         const ctx = getAudioContext();
         const source = ctx.createMediaStreamSource(remoteStream);
-        const gainNode = ctx.createGain();
 
+        // 1. Highpass filter (< 80Hz) to cut background AC rumblings, bumps and low humming noise
+        const lowCut = ctx.createBiquadFilter();
+        lowCut.type = "highpass";
+        lowCut.frequency.setValueAtTime(80, ctx.currentTime);
+
+        // 2. Peaking filter to add warmth/richness to vocals (boost +3.5dB around 200Hz)
+        const warmth = ctx.createBiquadFilter();
+        warmth.type = "peaking";
+        warmth.frequency.setValueAtTime(200, ctx.currentTime);
+        warmth.Q.setValueAtTime(1.0, ctx.currentTime);
+        warmth.gain.setValueAtTime(3.5, ctx.currentTime);
+
+        // 3. Peaking filter to boost presence/clarity/intelligibility (boost +4.0dB around 3000Hz)
+        const clarity = ctx.createBiquadFilter();
+        clarity.type = "peaking";
+        clarity.frequency.setValueAtTime(3000, ctx.currentTime);
+        clarity.Q.setValueAtTime(1.2, ctx.currentTime);
+        clarity.gain.setValueAtTime(4.0, ctx.currentTime);
+
+        // 4. Volume Gain Node connected to output
+        const gainNode = ctx.createGain();
         gainNode.gain.setValueAtTime(speakerVolumeRef.current, ctx.currentTime);
         speakerGainNodeRef.current = gainNode;
 
-        source.connect(gainNode);
+        // Route: Source -> LowCut (Highpass) -> Warmth (200Hz) -> Clarity (3kHz) -> Volume -> Speakers
+        source.connect(lowCut);
+        lowCut.connect(warmth);
+        warmth.connect(clarity);
+        clarity.connect(gainNode);
         gainNode.connect(ctx.destination);
       } catch (err) {
         console.error("Failed to build Web Audio graph for incoming stream:", err);
@@ -272,13 +306,20 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       try {
         const ctx = getAudioContext();
         const source = ctx.createMediaStreamSource(rawStream);
-        const gainNode = ctx.createGain();
 
+        // Low-cut filter on mic input to reject rumble and AC noise before transmission
+        const micLowCut = ctx.createBiquadFilter();
+        micLowCut.type = "highpass";
+        micLowCut.frequency.setValueAtTime(80, ctx.currentTime);
+
+        const gainNode = ctx.createGain();
         gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
         micGainNodeRef.current = gainNode;
 
         const dest = ctx.createMediaStreamDestination();
-        source.connect(gainNode);
+        
+        source.connect(micLowCut);
+        micLowCut.connect(gainNode);
         gainNode.connect(dest);
 
         dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
@@ -325,13 +366,20 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       try {
         const ctx = getAudioContext();
         const source = ctx.createMediaStreamSource(rawStream);
-        const gainNode = ctx.createGain();
 
+        // Low-cut filter on mic input to reject rumble and AC noise before transmission
+        const micLowCut = ctx.createBiquadFilter();
+        micLowCut.type = "highpass";
+        micLowCut.frequency.setValueAtTime(80, ctx.currentTime);
+
+        const gainNode = ctx.createGain();
         gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
         micGainNodeRef.current = gainNode;
 
         const dest = ctx.createMediaStreamDestination();
-        source.connect(gainNode);
+        
+        source.connect(micLowCut);
+        micLowCut.connect(gainNode);
         gainNode.connect(dest);
 
         dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
