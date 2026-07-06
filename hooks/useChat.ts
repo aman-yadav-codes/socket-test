@@ -23,6 +23,8 @@ export interface ToastData {
 }
 
 export interface UseChatReturn {
+  /** Live socket instance — pass to useWebRTC for signaling. null until connected. */
+  socket: ChatSocket | null;
   // Connection
   isConnected: boolean;
   socketId: string;
@@ -63,6 +65,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
   const [connectedUsers, setConnectedUsers] = useState<ChatUser[]>([]);
   const [input, setInput] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [socket, setSocket] = useState<ChatSocket | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [isToastVisible, setIsToastVisible] = useState(false);
 
@@ -132,6 +135,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
 
     const socket = createChatSocket(username);
     socketRef.current = socket;
+    setSocket(socket);
 
     socket.on("connect", () => {
       setIsConnected(true);
@@ -181,6 +185,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
     return () => {
       socket.disconnect();
       socketRef.current = null;
+      setSocket(null);
     };
   }, [username, playSound, showToast]);
 
@@ -204,6 +209,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
   const toggleSound = useCallback(() => setSoundEnabled((v) => !v), []);
 
   return {
+    socket,
     isConnected,
     socketId,
     messages,

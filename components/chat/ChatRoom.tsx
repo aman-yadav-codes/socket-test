@@ -9,6 +9,7 @@
 "use client";
 
 import { useChat } from "@/hooks/useChat";
+import { useWebRTC } from "@/hooks/useWebRTC";
 import {
   Card,
   CardContent,
@@ -23,6 +24,10 @@ import UserList from "./UserList";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
 import ToastNotification from "./ToastNotification";
+import CallButton from "./CallButton";
+import IncomingCallToast from "./IncomingCallToast";
+import OutgoingCallIndicator from "./OutgoingCallIndicator";
+import ActiveCallWidget from "./ActiveCallWidget";
 
 interface Props {
   username: string;
@@ -30,6 +35,14 @@ interface Props {
 
 export default function ChatRoom({ username }: Props) {
   const chat = useChat({ username });
+  const webrtc = useWebRTC({
+    socket: chat.socket,
+    socketId: chat.socketId,
+    username,
+  });
+
+  // Filter out self from list of potential call recipients
+  const otherUsers = chat.connectedUsers.filter((u) => u.id !== chat.socketId);
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4 bg-zinc-50 dark:bg-zinc-950">
@@ -44,6 +57,12 @@ export default function ChatRoom({ username }: Props) {
           </div>
           <div className="flex items-center gap-2">
             <SoundToggle enabled={chat.soundEnabled} onToggle={chat.toggleSound} />
+            <CallButton
+              users={otherUsers}
+              callStatus={webrtc.callStatus}
+              onCall={webrtc.startCall}
+              onEndCall={webrtc.endCall}
+            />
             <Badge variant={chat.isConnected ? "default" : "destructive"}>
               {chat.isConnected ? "Connected" : "Disconnected"}
             </Badge>
@@ -78,6 +97,32 @@ export default function ChatRoom({ username }: Props) {
           isVisible={chat.isToastVisible}
           onDismiss={chat.dismissToast}
           onMessageClick={chat.scrollToMessage}
+        />
+      )}
+
+      {/* WebRTC Calling UI components */}
+      {webrtc.callStatus === "ringing" && webrtc.incomingCall && (
+        <IncomingCallToast
+          callerName={webrtc.incomingCall.fromUsername}
+          onAccept={webrtc.acceptCall}
+          onReject={webrtc.rejectCall}
+        />
+      )}
+
+      {webrtc.callStatus === "calling" && (
+        <OutgoingCallIndicator
+          name={webrtc.callTargetName}
+          onCancel={webrtc.endCall}
+        />
+      )}
+
+      {webrtc.callStatus === "active" && (
+        <ActiveCallWidget
+          name={webrtc.callTargetName}
+          isMuted={webrtc.isMuted}
+          onToggleMute={webrtc.toggleMute}
+          onEndCall={webrtc.endCall}
+          remoteAudioRef={webrtc.remoteAudioRef}
         />
       )}
     </div>

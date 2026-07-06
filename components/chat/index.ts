@@ -12,3 +12,8 @@ export { default as UserList } from "./UserList";
 export { default as ChatInput } from "./ChatInput";
 export { default as SoundToggle } from "./SoundToggle";
 export { default as ToastNotification } from "./ToastNotification";
+export { default as CallButton } from "./CallButton";
+export { default as IncomingCallToast } from "./IncomingCallToast";
+export { default as ActiveCallWidget } from "./ActiveCallWidget";
+export { default as OutgoingCallIndicator } from "./OutgoingCallIndicator";
+
