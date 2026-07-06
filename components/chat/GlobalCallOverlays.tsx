@@ -18,6 +18,10 @@ export default function GlobalCallOverlays() {
 
   return (
     <>
+      {/* Unconditionally mount the audio element so browsers pull WebRTC remote audio frames from the network */}
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio ref={webrtc.remoteAudioRef} autoPlay className="hidden" />
+
       {/* Slide-in toast — clicking jumps to the message */}
       {chat.toast && (
         <ToastNotification
