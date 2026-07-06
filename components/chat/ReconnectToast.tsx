@@ -10,11 +10,12 @@ import { PhoneCall, X } from "lucide-react";
 
 interface Props {
   targetUsername: string;
+  isOnline: boolean;
   onReconnect: () => void;
   onDismiss: () => void;
 }
 
-export default function ReconnectToast({ targetUsername, onReconnect, onDismiss }: Props) {
+export default function ReconnectToast({ targetUsername, isOnline, onReconnect, onDismiss }: Props) {
   const [timeLeft, setTimeLeft] = useState(5);
 
   useEffect(() => {
@@ -75,10 +76,15 @@ export default function ReconnectToast({ targetUsername, onReconnect, onDismiss 
           </button>
           <button
             onClick={onReconnect}
-            className="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold transition-colors shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+            disabled={!isOnline}
+            className={`flex-1 py-2 rounded-xl text-white text-xs font-semibold transition-colors shadow-md flex items-center justify-center gap-1.5 ${
+              isOnline
+                ? "bg-emerald-500 hover:bg-emerald-600 cursor-pointer"
+                : "bg-zinc-300 dark:bg-zinc-700 cursor-not-allowed text-zinc-500"
+            }`}
           >
             <PhoneCall className="h-3 w-3" />
-            Reconnect ({timeLeft}s)
+            {isOnline ? `Reconnect (${timeLeft}s)` : "Connecting..."}
           </button>
         </div>
       </div>

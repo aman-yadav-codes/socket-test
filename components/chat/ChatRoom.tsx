@@ -153,6 +153,7 @@ export default function ChatRoom({ username }: Props) {
       {reconnectTarget && (
         <ReconnectToast
           targetUsername={reconnectTarget}
+          isOnline={!!otherUsers.find((u) => u.username === reconnectTarget)}
           onReconnect={handleReconnect}
           onDismiss={handleDismissReconnect}
         />
