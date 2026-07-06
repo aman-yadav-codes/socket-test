@@ -1,23 +1,19 @@
 /**
  * SocketDemo.tsx
- * Demo entry point — handles the join flow then renders ChatRoom.
- * This thin wrapper is the only place that manages the "has user joined?" state.
- *
- * To use the chat in another project, copy the /components/chat module,
- * /hooks/useChat.ts, /lib/chatSocket.ts, and /types/chat.ts, then render:
- *
- *   <JoinScreen ... />  →  <ChatRoom username={name} />
+ * Entry wrapper for the chat demo. Consumes global ChatCall provider context
+ * to decide whether to show the Join Screen or the Chat Room.
  */
 "use client";
 
 import { useState } from "react";
+import { useChatCall } from "@/providers/ChatCallProvider";
 import { ChatRoom, JoinScreen } from "@/components/chat";
 
 export default function SocketDemo() {
-  const [username, setUsername] = useState("");
+  const { username, setUsername, isNameEntered } = useChatCall();
   const [nameInput, setNameInput] = useState("");
 
-  if (!username) {
+  if (!isNameEntered) {
     return (
       <JoinScreen
         value={nameInput}

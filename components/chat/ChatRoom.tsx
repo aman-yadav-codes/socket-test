@@ -1,15 +1,11 @@
 /**
  * ChatRoom.tsx
- * The main chat room shell. This is the only component with state — it delegates
- * everything to the useChat hook and wires the sub-components together.
- *
- * To embed in another project:
- *   <ChatRoom username="Alice" />
+ * The main chat room shell. This component reads the persistent socket
+ * and WebRTC calling states from the global ChatCallContext provider.
  */
 "use client";
 
-import { useChat } from "@/hooks/useChat";
-import { useWebRTC } from "@/hooks/useWebRTC";
+import { useChatCall } from "@/providers/ChatCallProvider";
 import {
   Card,
   CardContent,
@@ -23,33 +19,23 @@ import SoundToggle from "./SoundToggle";
 import UserList from "./UserList";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
-import ToastNotification from "./ToastNotification";
 import CallButton from "./CallButton";
-import IncomingCallToast from "./IncomingCallToast";
-import OutgoingCallIndicator from "./OutgoingCallIndicator";
-import ActiveCallWidget from "./ActiveCallWidget";
 
 interface Props {
   username: string;
 }
 
 export default function ChatRoom({ username }: Props) {
-  const chat = useChat({ username });
-  const webrtc = useWebRTC({
-    socket: chat.socket,
-    socketId: chat.socketId,
-    username,
-  });
+  const { chat, webrtc } = useChatCall();
+
+  // If layout provider is not initialized yet, show loader or empty
+  if (!chat || !webrtc) return null;
 
   // Filter out self from list of potential call recipients
   const otherUsers = chat.connectedUsers.filter((u) => u.id !== chat.socketId);
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4 bg-zinc-50 dark:bg-zinc-950">
-      {/* Unconditionally mount the audio element to prevent React race conditions during WebRTC negotiation */}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-      <audio ref={webrtc.remoteAudioRef} autoPlay className="hidden" />
-
       <Card className="w-full max-w-md shadow-xl border-zinc-200 dark:border-zinc-800 relative overflow-visible">
         {/* Header */}
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -93,46 +79,6 @@ export default function ChatRoom({ username }: Props) {
           />
         </CardFooter>
       </Card>
-
-      {/* Slide-in toast — clicking jumps to the message */}
-      {chat.toast && (
-        <ToastNotification
-          toast={chat.toast}
-          isVisible={chat.isToastVisible}
-          onDismiss={chat.dismissToast}
-          onMessageClick={chat.scrollToMessage}
-        />
-      )}
-
-      {/* WebRTC Calling UI components */}
-      {webrtc.callStatus === "ringing" && webrtc.incomingCall && (
-        <IncomingCallToast
-          callerName={webrtc.incomingCall.fromUsername}
-          onAccept={webrtc.acceptCall}
-          onReject={webrtc.rejectCall}
-        />
-      )}
-
-      {webrtc.callStatus === "calling" && (
-        <OutgoingCallIndicator
-          name={webrtc.callTargetName}
-          onCancel={webrtc.endCall}
-        />
-      )}
-
-      {webrtc.callStatus === "active" && (
-        <ActiveCallWidget
-          name={webrtc.callTargetName}
-          isMuted={webrtc.isMuted}
-          onToggleMute={webrtc.toggleMute}
-          onEndCall={webrtc.endCall}
-          remoteAudioRef={webrtc.remoteAudioRef}
-          micGain={webrtc.micGain}
-          onMicGainChange={webrtc.setMicGain}
-          speakerVolume={webrtc.speakerVolume}
-          onSpeakerVolumeChange={webrtc.setSpeakerVolume}
-        />
-      )}
     </div>
   );
 }

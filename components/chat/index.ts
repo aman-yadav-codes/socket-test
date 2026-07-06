@@ -16,4 +16,5 @@ export { default as CallButton } from "./CallButton";
 export { default as IncomingCallToast } from "./IncomingCallToast";
 export { default as ActiveCallWidget } from "./ActiveCallWidget";
 export { default as OutgoingCallIndicator } from "./OutgoingCallIndicator";
+export { default as GlobalCallOverlays } from "./GlobalCallOverlays";
 
