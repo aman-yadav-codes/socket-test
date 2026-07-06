@@ -2,15 +2,13 @@
  * useWebRTC.ts
  * Manages a 1-to-1 voice call using WebRTC, with Socket.IO as the signaling channel.
  *
- * It requests studio-quality 48kHz HD audio constraints, applies noise suppression
- * and echo cancellation, and rewrites SDP profiles to force Opus codec configuration
- * with a high-fidelity 128kbps Constant Bit Rate (CBR) channel in "audio" mode.
- *
- * To survive page refreshes/reloads:
- *  - On page unload, it saves the current timestamp to sessionStorage.
- *  - Upon mounting, if a refresh occurred within 10 seconds, it attempts to auto-dial the peer.
- *  - The remote peer, upon detecting a disconnection, waits up to 10 seconds in a grace period
- *    before playing the hang-up beep and cleaning up, enabling seamless auto-acceptance.
+ * Updates:
+ *  - Properly disposes and closes any residual PeerConnection or AudioContext
+ *    before initiating or accepting a reconnect call, avoiding connection conflicts.
+ *  - Implements document-wide gesture listeners (click/keydown) to automatically unlock
+ *    and resume suspended Web Audio AudioContexts due to browser autoplay blocks on reload.
+ *  - Plays a high-fidelity synthetic ascending double-beep notification sound upon successful
+ *    call reconnection/establishment so users know they are connected.
  */
 "use client";
 
@@ -89,6 +87,7 @@ function boostAudioBitrate(sdp: string): string {
   return lines.join("\r\n");
 }
 
+// Play synthetic professional descending beep on disconnect
 const playDisconnectBeep = () => {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -113,6 +112,35 @@ const playDisconnectBeep = () => {
     }, 450);
   } catch (e) {
     console.error("Failed to play disconnect beep:", e);
+  }
+};
+
+// Play synthetic ascending double-beep on successful connection
+const playConnectBeep = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    // Short ascending beeps (A4 -> C#5)
+    osc.frequency.setValueAtTime(440, ctx.currentTime);
+    osc.frequency.setValueAtTime(554, ctx.currentTime + 0.12);
+
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 300);
+  } catch (e) {
+    console.error("Failed to play connect beep:", e);
   }
 };
 
@@ -161,13 +189,28 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     if (typeof window === "undefined") return;
     const handleUnload = () => {
       isUnloadingRef.current = true;
-      // If we were in a call, store the unload timestamp so we can verify if it reloads within 10s
       if (callStatusRef.current === "active" || callStatusRef.current === "calling") {
         sessionStorage.setItem("active_call_timestamp", Date.now().toString());
       }
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
+  }, []);
+
+  // Unlock and resume AudioContext on user interaction to bypass autoplay restrictions on refresh
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const resumeContext = () => {
+      if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+    };
+    window.addEventListener("click", resumeContext);
+    window.addEventListener("keydown", resumeContext);
+    return () => {
+      window.removeEventListener("click", resumeContext);
+      window.removeEventListener("keydown", resumeContext);
+    };
   }, []);
 
   const updateSpeakerVolume = useCallback(() => {
@@ -267,7 +310,6 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
         console.log("[WebRTC] Call disconnected. Waiting 10s grace period for auto-reconnect...");
 
-        // Schedule cleanup after 10 seconds if no reconnect offer is received
         if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = setTimeout(() => {
           console.log("[WebRTC] Grace period expired. Cleaning up.");
@@ -282,25 +324,30 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     return pc;
   }, [socket, getAudioContext]);
 
-  const cleanup = useCallback(() => {
+  // Closes active connections and streams cleanly without modifying React state parameters
+  const closeActiveConnection = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     peerRef.current?.close();
     peerRef.current = null;
-    ringtoneRef.current?.pause();
-    if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
 
     speakerGainNodeRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
+  }, []);
+
+  const cleanup = useCallback(() => {
+    closeActiveConnection();
+
+    ringtoneRef.current?.pause();
+    if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
 
     pendingCandidates.current = [];
     callTargetIdRef.current = "";
@@ -310,7 +357,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     setCallTargetName("");
     setIsMuted(false);
     setAutoAcceptTrigger(null);
-  }, []);
+  }, [closeActiveConnection]);
 
   // ── WebRTC Actions ───────────────────────────────────────────────────────
 
@@ -318,6 +365,9 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     if (!socket || callStatus !== "idle") return;
 
     try {
+      // Clean up any residual connection slots
+      closeActiveConnection();
+
       const rawStream = await navigator.mediaDevices.getUserMedia({
         audio: HD_AUDIO_CONSTRAINTS,
         video: false,
@@ -344,12 +394,12 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       console.error("Failed to start call:", err);
       cleanup();
     }
-  }, [socket, callStatus, createPeerConnection, cleanup]);
+  }, [socket, callStatus, createPeerConnection, closeActiveConnection, cleanup]);
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall || !socket) return;
 
-    // Clear any pending disconnect timeouts since a call is now resuming
+    // Clear any pending disconnect timeouts
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -358,6 +408,9 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     ringtoneRef.current?.pause();
 
     try {
+      // Clean up any residual connection slots before starting new session
+      closeActiveConnection();
+
       const rawStream = await navigator.mediaDevices.getUserMedia({
         audio: HD_AUDIO_CONSTRAINTS,
         video: false,
@@ -386,6 +439,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       callTargetIdRef.current = incomingCall.fromSocketId;
       setCallTargetName(incomingCall.fromUsername);
       setCallStatus("active");
+      playConnectBeep(); // Play visual/audio connection confirmation chime
+
       sessionStorage.setItem("active_call_username", incomingCall.fromUsername);
       sessionStorage.removeItem("active_call_timestamp");
       setIncomingCall(null);
@@ -396,7 +451,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       console.error("Failed to accept call:", err);
       cleanup();
     }
-  }, [incomingCall, socket, createPeerConnection, micGain, cleanup]);
+  }, [incomingCall, socket, createPeerConnection, closeActiveConnection, micGain, cleanup]);
 
   const rejectCall = useCallback(() => {
     if (!incomingCall || !socket) return;
@@ -424,14 +479,12 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   }, []);
 
   // ── Auto-Reconnect Handler ───────────────────────────────────────────────
-  // Detects if we were previously in a call with a user who is online now, verifying 10s limit
   useEffect(() => {
     if (!socket || callStatus !== "idle") return;
     const savedActiveUser = sessionStorage.getItem("active_call_username");
     const savedTimestamp = sessionStorage.getItem("active_call_timestamp");
 
     if (savedActiveUser) {
-      // Validate 10 second refresh window limit
       if (savedTimestamp) {
         const elapsed = Date.now() - parseInt(savedTimestamp, 10);
         if (elapsed > 10000) {
@@ -445,13 +498,12 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       const activeUserObj = connectedUsers.find((u) => u.username === savedActiveUser);
       if (activeUserObj) {
         console.log("[call-reconnect] Auto dialing target peer within 10s window:", savedActiveUser);
-        sessionStorage.removeItem("active_call_timestamp"); // clear so we only run once
+        sessionStorage.removeItem("active_call_timestamp");
         startCall(activeUserObj.id, activeUserObj.username, true);
       }
     }
   }, [connectedUsers, socket, callStatus, startCall]);
 
-  // Triggers acceptCall automatically if the autoAcceptTrigger changes
   useEffect(() => {
     if (autoAcceptTrigger && callStatus === "ringing" && incomingCall) {
       console.log("[call-reconnect] Auto-accepting reconnecting call from:", autoAcceptTrigger.fromUsername);
@@ -470,7 +522,6 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       const wasInCallWithThem = sessionStorage.getItem("active_call_username") === fromUsername;
 
       if (isReconnect && wasInCallWithThem) {
-        // Clear any pending disconnect timeouts since a call is now resuming
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
           reconnectTimeoutRef.current = null;
@@ -504,6 +555,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
         }
         pendingCandidates.current = [];
         setCallStatus("active");
+        playConnectBeep(); // Play visual/audio connection confirmation chime
+
         sessionStorage.setItem("active_call_username", callTargetNameRef.current);
         sessionStorage.removeItem("active_call_timestamp");
         socket.emit("mic-gain-change", { to: callTargetIdRef.current, gain: micGain });
