@@ -494,6 +494,18 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     };
   }, [socket, micGain, updateSpeakerVolume, cleanup]);
 
+  // Automatically clean up call if our call target goes offline (e.g. they refreshed or closed the tab)
+  useEffect(() => {
+    if (callStatus !== "idle" && callTargetName) {
+      const isTargetOnline = connectedUsers.some((u) => u.username === callTargetName);
+      if (!isTargetOnline) {
+        console.log("[WebRTC] Call partner went offline. Ending call.");
+        playDisconnectBeep();
+        cleanup();
+      }
+    }
+  }, [connectedUsers, callStatus, callTargetName, cleanup]);
+
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
   return {
