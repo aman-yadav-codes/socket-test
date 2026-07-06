@@ -2,8 +2,9 @@
  * useWebRTC.ts
  * Manages a 1-to-1 voice call using WebRTC, with Socket.IO as the signaling channel.
  *
- * It uses the Web Audio API to route and boost both incoming speaker audio
- * and outgoing mic gain, providing the adjustable sliders the user requested.
+ * It requests studio-quality 48kHz HD audio constraints, applies noise suppression
+ * and echo cancellation, and rewrites SDP profiles to force Opus codec configuration
+ * with a high-fidelity 128kbps Constant Bit Rate (CBR) channel.
  */
 "use client";
 
@@ -39,6 +40,49 @@ export interface UseWebRTCReturn {
   setMicGain: (v: number) => void;
   speakerVolume: number;
   setSpeakerVolume: (v: number) => void;
+}
+
+// ── Studio Quality Media Constraints ─────────────────────────────────────────
+const HD_AUDIO_CONSTRAINTS = {
+  echoCancellation: { ideal: true },
+  noiseSuppression: { ideal: true },
+  autoGainControl: { ideal: true },
+  sampleRate: { ideal: 48000 },
+  sampleSize: { ideal: 16 },
+  channelCount: { ideal: 1 }, // Mono for high quality low latency voice calls
+};
+
+// ── SDP Opus Bitrate Booster ────────────────────────────────────────────────
+// Forces 128kbps constant bitrate (CBR) stereo/high-def properties on Opus streams
+function boostAudioBitrate(sdp: string): string {
+  let lines = sdp.split("\r\n");
+  let opusPayloadType: string | null = null;
+
+  // Locate the Opus payload ID (typically 111)
+  for (const line of lines) {
+    if (line.includes("opus/48000")) {
+      const match = line.match(/a=rtpmap:(\d+)/);
+      if (match) {
+        opusPayloadType = match[1];
+        break;
+      }
+    }
+  }
+
+  if (opusPayloadType) {
+    lines = lines.map((line) => {
+      // Find the fmtp parameter line for the Opus codec
+      if (line.startsWith(`a=fmtp:${opusPayloadType}`)) {
+        // Enforce high audio quality parameters: 128kbps, enable stereo decoding/rendering, enable forward error correction
+        if (!line.includes("maxaveragebitrate")) {
+          return `${line};maxaveragebitrate=128000;stereo=1;sprop-stereo=1;useinbandfec=1;cbr=1`;
+        }
+      }
+      return line;
+    });
+  }
+
+  return lines.join("\r\n");
 }
 
 // Play synthetic professional descending beep on disconnect
@@ -214,7 +258,11 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     if (!socket || callStatus !== "idle") return;
 
     try {
-      const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // Request high definition audio constraints (noise filtering, echo suppression, 48kHz sample rate)
+      const rawStream = await navigator.mediaDevices.getUserMedia({
+        audio: HD_AUDIO_CONSTRAINTS,
+        video: false,
+      });
       localStreamRef.current = rawStream;
 
       const pc = createPeerConnection();
@@ -240,13 +288,17 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       }
 
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+      // Boost Opus audio bitrate in SDP offer
+      const boostedOfferSdp = boostAudioBitrate(offer.sdp || "");
+      const boostedOffer = { type: offer.type, sdp: boostedOfferSdp };
+
+      await pc.setLocalDescription(boostedOffer);
 
       callTargetIdRef.current = targetSocketId;
       setCallTargetName(targetUsername);
       setCallStatus("calling");
 
-      socket.emit("call-user", { to: targetSocketId, offer });
+      socket.emit("call-user", { to: targetSocketId, offer: boostedOffer });
     } catch (err) {
       console.error("Failed to start call:", err);
       cleanup();
@@ -259,7 +311,11 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     ringtoneRef.current?.pause();
 
     try {
-      const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // Request high definition audio constraints (noise filtering, echo suppression, 48kHz sample rate)
+      const rawStream = await navigator.mediaDevices.getUserMedia({
+        audio: HD_AUDIO_CONSTRAINTS,
+        video: false,
+      });
       localStreamRef.current = rawStream;
 
       const pc = createPeerConnection();
@@ -284,7 +340,9 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
         rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
       }
 
-      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      // Boost Opus audio bitrate in incoming SDP offer before setting
+      const boostedOfferSdp = boostAudioBitrate(incomingCall.offer.sdp || "");
+      await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: boostedOfferSdp }));
 
       for (const c of pendingCandidates.current) {
         await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
@@ -292,14 +350,18 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       pendingCandidates.current = [];
 
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+      // Boost Opus audio bitrate in local SDP answer
+      const boostedAnswerSdp = boostAudioBitrate(answer.sdp || "");
+      const boostedAnswer = { type: answer.type, sdp: boostedAnswerSdp };
+
+      await pc.setLocalDescription(boostedAnswer);
 
       callTargetIdRef.current = incomingCall.fromSocketId;
       setCallTargetName(incomingCall.fromUsername);
       setCallStatus("active");
       setIncomingCall(null);
 
-      socket.emit("call-answer", { to: incomingCall.fromSocketId, answer });
+      socket.emit("call-answer", { to: incomingCall.fromSocketId, answer: boostedAnswer });
     } catch (err) {
       console.error("Failed to accept call:", err);
       cleanup();
@@ -345,7 +407,9 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     const onCallAnswered = async ({ answer }: { from: string; answer: RTCSessionDescriptionInit }) => {
       if (!peerRef.current) return;
       try {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        // Boost Opus audio bitrate in remote answer before setting
+        const boostedAnswerSdp = boostAudioBitrate(answer.sdp || "");
+        await peerRef.current.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: boostedAnswerSdp }));
         for (const c of pendingCandidates.current) {
           await peerRef.current.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
         }
