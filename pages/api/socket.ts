@@ -78,6 +78,9 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIO) => {
       socket.on("ice-candidate", ({ to, candidate }) => {
         io.to(to).emit("ice-candidate", { from: socket.id, candidate });
       });
+      socket.on("mic-gain-change", ({ to, gain }) => {
+        io.to(to).emit("mic-gain-change", { gain });
+      });
       // ────────────────────────────────────────────────────────────────────────
 
       socket.on("disconnect", () => {

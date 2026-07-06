@@ -18,6 +18,7 @@ export interface ServerToClientEvents {
   "call-rejected": (data: { from: string }) => void;
   "call-ended":    (data: { from: string }) => void;
   "ice-candidate": (data: { from: string; candidate: RTCIceCandidateInit }) => void;
+  "mic-gain-change": (data: { gain: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -31,6 +32,7 @@ export interface ClientToServerEvents {
   "call-rejected": (data: { to: string }) => void;
   "call-ended":    (data: { to: string }) => void;
   "ice-candidate": (data: { to: string; candidate: RTCIceCandidateInit }) => void;
+  "mic-gain-change": (data: { to: string; gain: number }) => void;
 }
 
 export type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

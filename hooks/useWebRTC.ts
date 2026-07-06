@@ -2,14 +2,14 @@
  * useWebRTC.ts
  * Manages a 1-to-1 voice call using WebRTC, with Socket.IO as the signaling channel.
  *
- * Updates:
- *  - Configures studio-grade 48kHz HD audio capture.
- *  - Rewrites SDP profiles to force high-fidelity Opus encoding at 128kbps Constant Bit Rate
- *    in "audio" application mode (forcing full-band music/voice profiles instead of dynamic VOIP).
- *  - Implements a real-time Vocal Equalizer (DSP) on the receiver stream using the Web Audio API:
- *      1. Highpass filter (< 80Hz) to cut background rumblings and AC hums.
- *      2. Peaking EQ filter (+3.5dB @ 200Hz) to add warmth and richness to the vocals.
- *      3. Peaking EQ filter (+4.0dB @ 3000Hz) to boost presence and clarity (crisp speech).
+ * It requests studio-quality 48kHz HD audio constraints, applies noise suppression
+ * and echo cancellation, and rewrites SDP profiles to force Opus codec configuration
+ * with a high-fidelity 128kbps Constant Bit Rate (CBR) channel in "audio" mode.
+ *
+ * To avoid disabling the browser's hardware Echo Cancellation and Noise Gate, the
+ * local microphone stream is transmitted unprocessed. Mic Gain boosts are communicated
+ * over the signaling socket and applied on the receiving side using the Web Audio API
+ * along with the speaker volume and a 3-stage Vocal EQ DSP.
  */
 "use client";
 
@@ -54,7 +54,7 @@ const HD_AUDIO_CONSTRAINTS = {
   autoGainControl: { ideal: true },
   sampleRate: { ideal: 48000 },
   sampleSize: { ideal: 16 },
-  channelCount: { ideal: 1 }, // Mono is optimized for vocal fidelity in voice calls
+  channelCount: { ideal: 1 }, // Mono mono is best for voice quality/noise-cancellation
 };
 
 // ── SDP Opus High-Fidelity Booster ───────────────────────────────────────────
@@ -83,7 +83,7 @@ function boostAudioBitrate(sdp: string): string {
         // - stereo=1 & sprop-stereo=1 (enable stereo rendering)
         // - useinbandfec=1 (forward error correction)
         // - cbr=1 (constant bit rate mode)
-        // - application=audio (instructs Opus to optimize for general high-fidelity sound rather than aggressive voip compression)
+        // - application=audio (hi-fi sound optimization instead of aggressive voip compression)
         if (!line.includes("maxaveragebitrate")) {
           return `${line};maxaveragebitrate=128000;maxplaybackrate=48000;sprop-maxcapturerate=48000;stereo=1;sprop-stereo=1;useinbandfec=1;cbr=1;application=audio`;
         }
@@ -129,7 +129,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
   const [isMuted, setIsMuted] = useState(false);
   const [callTargetName, setCallTargetName] = useState("");
 
-  // Sound adjustments (default 100% gain = 1.0)
+  // Volume & mic gain adjustments (default 100% gain = 1.0)
   const [micGain, setMicGain] = useState(1.0);
   const [speakerVolume, setSpeakerVolume] = useState(1.0);
 
@@ -143,30 +143,35 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
 
   // Web Audio Context & Gain Nodes refs
   const audioContextRef = useRef<AudioContext | null>(null);
-  const micGainNodeRef = useRef<GainNode | null>(null);
   const speakerGainNodeRef = useRef<GainNode | null>(null);
 
   // Sync state refs to prevent stale closure bugs in callbacks
   const speakerVolumeRef = useRef(speakerVolume);
-  const micGainRef = useRef(micGain);
+  const remoteMicGainRef = useRef(1.0);
 
   useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-  useEffect(() => {
-    speakerVolumeRef.current = speakerVolume;
+  // Recalculates combined gain: Speaker Volume * Remote Mic Gain (boost)
+  const updateSpeakerVolume = useCallback(() => {
     if (speakerGainNodeRef.current && audioContextRef.current) {
-      speakerGainNodeRef.current.gain.setValueAtTime(speakerVolume, audioContextRef.current.currentTime);
+      const combinedGain = speakerVolumeRef.current * remoteMicGainRef.current;
+      speakerGainNodeRef.current.gain.setValueAtTime(combinedGain, audioContextRef.current.currentTime);
     }
-  }, [speakerVolume]);
+  }, []);
 
   useEffect(() => {
-    micGainRef.current = micGain;
-    if (micGainNodeRef.current && audioContextRef.current) {
-      micGainNodeRef.current.gain.setValueAtTime(micGain, audioContextRef.current.currentTime);
+    speakerVolumeRef.current = speakerVolume;
+    updateSpeakerVolume();
+  }, [speakerVolume, updateSpeakerVolume]);
+
+  // Notify other party when local mic gain setting changes
+  useEffect(() => {
+    if (socket && callTargetIdRef.current) {
+      socket.emit("mic-gain-change", { to: callTargetIdRef.current, gain: micGain });
     }
-  }, [micGain]);
+  }, [micGain, socket]);
 
   // Preload incoming call ringtone
   useEffect(() => {
@@ -204,8 +209,8 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     pc.ontrack = (e) => {
       const remoteStream = e.streams[0];
 
-      // Mute the raw audio element (set volume to 0) to prevent double audio playback
-      // since we route it through AudioContext destination node below
+      // Mute raw HTML audio element to prevent double audio playback
+      // since we route it through AudioContext destination below
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = remoteStream;
         remoteAudioRef.current.volume = 0;
@@ -216,6 +221,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
         const ctx = getAudioContext();
         const source = ctx.createMediaStreamSource(remoteStream);
 
+        // ── Real-time Vocal EQ Pipeline ──
         // 1. Highpass filter (< 80Hz) to cut background AC rumblings, bumps and low humming noise
         const lowCut = ctx.createBiquadFilter();
         lowCut.type = "highpass";
@@ -237,7 +243,8 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
 
         // 4. Volume Gain Node connected to output
         const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(speakerVolumeRef.current, ctx.currentTime);
+        const initialGain = speakerVolumeRef.current * remoteMicGainRef.current;
+        gainNode.gain.setValueAtTime(initialGain, ctx.currentTime);
         speakerGainNodeRef.current = gainNode;
 
         // Route: Source -> LowCut (Highpass) -> Warmth (200Hz) -> Clarity (3kHz) -> Volume -> Speakers
@@ -270,8 +277,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
 
-    // Close and reset Web Audio nodes
-    micGainNodeRef.current = null;
+    // Reset gain nodes and AudioContext
     speakerGainNodeRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
@@ -280,6 +286,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
 
     pendingCandidates.current = [];
     callTargetIdRef.current = "";
+    remoteMicGainRef.current = 1.0;
     setCallStatus("idle");
     setIncomingCall(null);
     setCallTargetName("");
@@ -292,7 +299,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     if (!socket || callStatus !== "idle") return;
 
     try {
-      // Request high definition audio constraints (noise filtering, echo suppression, 48kHz sample rate)
+      // Request high definition audio constraints
       const rawStream = await navigator.mediaDevices.getUserMedia({
         audio: HD_AUDIO_CONSTRAINTS,
         video: false,
@@ -302,31 +309,9 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       const pc = createPeerConnection();
       peerRef.current = pc;
 
-      // Process outgoing microphone audio via Web Audio GainNode to support gain boost
-      try {
-        const ctx = getAudioContext();
-        const source = ctx.createMediaStreamSource(rawStream);
-
-        // Low-cut filter on mic input to reject rumble and AC noise before transmission
-        const micLowCut = ctx.createBiquadFilter();
-        micLowCut.type = "highpass";
-        micLowCut.frequency.setValueAtTime(80, ctx.currentTime);
-
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
-        micGainNodeRef.current = gainNode;
-
-        const dest = ctx.createMediaStreamDestination();
-        
-        source.connect(micLowCut);
-        micLowCut.connect(gainNode);
-        gainNode.connect(dest);
-
-        dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
-      } catch (err) {
-        console.error("Local audio context routing failed, falling back to raw mic:", err);
-        rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
-      }
+      // Add tracks directly to keep browser hardware Echo Cancellation and Noise Gate active.
+      // Modifying microphone tracks via Web Audio Destination node disables AEC in most browsers.
+      rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
 
       const offer = await pc.createOffer();
       // Boost Opus audio bitrate in SDP offer
@@ -344,7 +329,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       console.error("Failed to start call:", err);
       cleanup();
     }
-  }, [socket, callStatus, createPeerConnection, getAudioContext, cleanup]);
+  }, [socket, callStatus, createPeerConnection, cleanup]);
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall || !socket) return;
@@ -352,7 +337,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     ringtoneRef.current?.pause();
 
     try {
-      // Request high definition audio constraints (noise filtering, echo suppression, 48kHz sample rate)
+      // Request high definition audio constraints
       const rawStream = await navigator.mediaDevices.getUserMedia({
         audio: HD_AUDIO_CONSTRAINTS,
         video: false,
@@ -362,31 +347,8 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       const pc = createPeerConnection();
       peerRef.current = pc;
 
-      // Process mic volume level via Web Audio
-      try {
-        const ctx = getAudioContext();
-        const source = ctx.createMediaStreamSource(rawStream);
-
-        // Low-cut filter on mic input to reject rumble and AC noise before transmission
-        const micLowCut = ctx.createBiquadFilter();
-        micLowCut.type = "highpass";
-        micLowCut.frequency.setValueAtTime(80, ctx.currentTime);
-
-        const gainNode = ctx.createGain();
-        gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
-        micGainNodeRef.current = gainNode;
-
-        const dest = ctx.createMediaStreamDestination();
-        
-        source.connect(micLowCut);
-        micLowCut.connect(gainNode);
-        gainNode.connect(dest);
-
-        dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
-      } catch (err) {
-        console.error("Local audio context routing failed, falling back to raw mic:", err);
-        rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
-      }
+      // Add tracks directly to keep browser hardware Echo Cancellation active
+      rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
 
       // Boost Opus audio bitrate in incoming SDP offer before setting
       const boostedOfferSdp = boostAudioBitrate(incomingCall.offer.sdp || "");
@@ -410,11 +372,13 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       setIncomingCall(null);
 
       socket.emit("call-answer", { to: incomingCall.fromSocketId, answer: boostedAnswer });
+      // Send initial mic gain setting to peer
+      socket.emit("mic-gain-change", { to: incomingCall.fromSocketId, gain: micGain });
     } catch (err) {
       console.error("Failed to accept call:", err);
       cleanup();
     }
-  }, [incomingCall, socket, createPeerConnection, getAudioContext, cleanup]);
+  }, [incomingCall, socket, createPeerConnection, micGain, cleanup]);
 
   const rejectCall = useCallback(() => {
     if (!incomingCall || !socket) return;
@@ -463,6 +427,8 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
         }
         pendingCandidates.current = [];
         setCallStatus("active");
+        // Send initial mic gain setting to peer
+        socket.emit("mic-gain-change", { to: callTargetIdRef.current, gain: micGain });
       } catch (err) {
         console.error("Failed to process call answer:", err);
         cleanup();
@@ -487,11 +453,17 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       }
     };
 
+    const onMicGainChange = ({ gain }: { gain: number }) => {
+      remoteMicGainRef.current = gain;
+      updateSpeakerVolume();
+    };
+
     socket.on("incoming-call", onIncomingCall);
     socket.on("call-answered", onCallAnswered);
     socket.on("call-rejected", onCallRejected);
     socket.on("call-ended",    onCallEnded);
     socket.on("ice-candidate", onIceCandidate);
+    socket.on("mic-gain-change", onMicGainChange);
 
     return () => {
       socket.off("incoming-call", onIncomingCall);
@@ -499,8 +471,9 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       socket.off("call-rejected", onCallRejected);
       socket.off("call-ended",    onCallEnded);
       socket.off("ice-candidate", onIceCandidate);
+      socket.off("mic-gain-change", onMicGainChange);
     };
-  }, [socket, cleanup]);
+  }, [socket, micGain, updateSpeakerVolume, cleanup]);
 
   useEffect(() => () => { cleanup(); }, [cleanup]);
 

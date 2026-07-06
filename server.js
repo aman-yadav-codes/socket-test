@@ -103,6 +103,7 @@ app.prepare().then(() => {
     socket.on("call-rejected",  ({ to })            => io.to(to).emit("call-rejected",  { from: socket.id }));
     socket.on("call-ended",     ({ to })            => io.to(to).emit("call-ended",     { from: socket.id }));
     socket.on("ice-candidate",  ({ to, candidate }) => io.to(to).emit("ice-candidate",  { from: socket.id, candidate }));
+    socket.on("mic-gain-change", ({ to, gain })      => io.to(to).emit("mic-gain-change", { gain }));
     // ────────────────────────────────────────────────────────────────────────
   });
 
