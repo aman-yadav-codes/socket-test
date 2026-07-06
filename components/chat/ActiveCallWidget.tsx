@@ -9,7 +9,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Mic, MicOff, PhoneOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
 
 interface Props {
   name: string;
@@ -17,6 +17,10 @@ interface Props {
   onToggleMute: () => void;
   onEndCall: () => void;
   remoteAudioRef: React.RefObject<HTMLAudioElement | null>;
+  micGain: number;
+  onMicGainChange: (v: number) => void;
+  speakerVolume: number;
+  onSpeakerVolumeChange: (v: number) => void;
 }
 
 function useCallTimer() {
@@ -30,7 +34,17 @@ function useCallTimer() {
   return `${mm}:${ss}`;
 }
 
-export default function ActiveCallWidget({ name, isMuted, onToggleMute, onEndCall, remoteAudioRef }: Props) {
+export default function ActiveCallWidget({
+  name,
+  isMuted,
+  onToggleMute,
+  onEndCall,
+  remoteAudioRef,
+  micGain,
+  onMicGainChange,
+  speakerVolume,
+  onSpeakerVolumeChange,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const duration = useCallTimer();
 
@@ -89,27 +103,69 @@ export default function ActiveCallWidget({ name, isMuted, onToggleMute, onEndCal
 
         {/* Expanded controls */}
         {expanded && (
-          <div className="flex gap-2 mt-3 pt-3 border-t border-zinc-700">
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleMute(); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-colors ${
-                isMuted
-                  ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
-                  : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
-              }`}
-              aria-label={isMuted ? "Unmute" : "Mute"}
-            >
-              {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-              {isMuted ? "Unmute" : "Mute"}
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onEndCall(); }}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
-              aria-label="End call"
-            >
-              <PhoneOff className="h-3.5 w-3.5" />
-              End
-            </button>
+          <div className="flex flex-col gap-3 mt-3 pt-3 border-t border-zinc-700/60 w-full text-zinc-300">
+            {/* Speaker Volume Slider */}
+            <div className="flex flex-col gap-1 w-full">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <Volume2 className="h-3.5 w-3.5 text-zinc-500" /> Speaker Volume
+                </span>
+                <span className="font-mono text-emerald-400">{Math.round(speakerVolume * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="2.5"
+                step="0.05"
+                value={speakerVolume}
+                onChange={(e) => onSpeakerVolumeChange(parseFloat(e.target.value))}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full accent-emerald-500 h-1 rounded-lg cursor-pointer bg-zinc-700 appearance-none"
+              />
+            </div>
+
+            {/* Mic Gain Slider */}
+            <div className="flex flex-col gap-1 w-full">
+              <div className="flex items-center justify-between text-[11px] font-semibold text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <Mic className="h-3.5 w-3.5 text-zinc-500" /> Mic Gain (Boost)
+                </span>
+                <span className="font-mono text-emerald-400">{Math.round(micGain * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="2.5"
+                step="0.05"
+                value={micGain}
+                onChange={(e) => onMicGainChange(parseFloat(e.target.value))}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full accent-emerald-500 h-1 rounded-lg cursor-pointer bg-zinc-700 appearance-none"
+              />
+            </div>
+
+            <div className="flex gap-2 w-full mt-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleMute(); }}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                  isMuted
+                    ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                    : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
+                }`}
+                aria-label={isMuted ? "Unmute" : "Mute"}
+              >
+                {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                {isMuted ? "Unmute" : "Mute"}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onEndCall(); }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-xs font-semibold transition-colors cursor-pointer"
+                aria-label="End call"
+              >
+                <PhoneOff className="h-3.5 w-3.5" />
+                End
+              </button>
+            </div>
           </div>
         )}
       </div>

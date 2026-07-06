@@ -2,10 +2,8 @@
  * useWebRTC.ts
  * Manages a 1-to-1 voice call using WebRTC, with Socket.IO as the signaling channel.
  *
- * State machine:
- *   idle ──startCall──► calling ──call-answered──► active ──endCall──► idle
- *   idle ──incoming-call──► ringing ──acceptCall──► active ──endCall──► idle
- *                                    └──rejectCall──► idle
+ * It uses the Web Audio API to route and boost both incoming speaker audio
+ * and outgoing mic gain, providing the adjustable sliders the user requested.
  */
 "use client";
 
@@ -19,7 +17,6 @@ const ICE_SERVERS: RTCIceServer[] = [
 ];
 
 export interface UseWebRTCOptions {
-  /** Live socket from useChat — null until connected. */
   socket: ChatSocket | null;
   socketId: string;
   username: string;
@@ -29,7 +26,6 @@ export interface UseWebRTCReturn {
   callStatus: CallStatus;
   incomingCall: IncomingCallData | null;
   isMuted: boolean;
-  /** Name of the remote party (caller or callee). */
   callTargetName: string;
   remoteAudioRef: React.RefObject<HTMLAudioElement | null>;
   startCall: (targetSocketId: string, targetUsername: string) => Promise<void>;
@@ -37,13 +33,51 @@ export interface UseWebRTCReturn {
   rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
+
+  // Sliders
+  micGain: number;
+  setMicGain: (v: number) => void;
+  speakerVolume: number;
+  setSpeakerVolume: (v: number) => void;
 }
+
+// Play synthetic professional descending beep on disconnect
+const playDisconnectBeep = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(320, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.35);
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 450);
+  } catch (e) {
+    console.error("Failed to play disconnect beep:", e);
+  }
+};
 
 export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): UseWebRTCReturn {
   const [callStatus, setCallStatus] = useState<CallStatus>("idle");
   const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [callTargetName, setCallTargetName] = useState("");
+
+  // Sound adjustments (default 100% gain = 1.0)
+  const [micGain, setMicGain] = useState(1.0);
+  const [speakerVolume, setSpeakerVolume] = useState(1.0);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -53,12 +87,34 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
   const callStatusRef = useRef<CallStatus>("idle");
 
-  // Sync callStatusRef with callStatus state to avoid stale closure issues in socket listeners
+  // Web Audio Context & Gain Nodes refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const micGainNodeRef = useRef<GainNode | null>(null);
+  const speakerGainNodeRef = useRef<GainNode | null>(null);
+
+  // Sync state refs to prevent stale closure bugs in callbacks
+  const speakerVolumeRef = useRef(speakerVolume);
+  const micGainRef = useRef(micGain);
+
   useEffect(() => {
     callStatusRef.current = callStatus;
   }, [callStatus]);
 
-  // Preload ringtone
+  useEffect(() => {
+    speakerVolumeRef.current = speakerVolume;
+    if (speakerGainNodeRef.current && audioContextRef.current) {
+      speakerGainNodeRef.current.gain.setValueAtTime(speakerVolume, audioContextRef.current.currentTime);
+    }
+  }, [speakerVolume]);
+
+  useEffect(() => {
+    micGainRef.current = micGain;
+    if (micGainNodeRef.current && audioContextRef.current) {
+      micGainNodeRef.current.gain.setValueAtTime(micGain, audioContextRef.current.currentTime);
+    }
+  }, [micGain]);
+
+  // Preload incoming call ringtone
   useEffect(() => {
     if (typeof window === "undefined") return;
     ringtoneRef.current = new Audio("/sounds/calm.mp3");
@@ -69,7 +125,18 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     };
   }, []);
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
+  // ── Web Audio Node Initializer ───────────────────────────────────────────
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch(() => {});
+    }
+    return audioContextRef.current;
+  }, []);
+
+  // ── Connection Helpers ───────────────────────────────────────────────────
 
   const createPeerConnection = useCallback(() => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -81,20 +148,40 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     };
 
     pc.ontrack = (e) => {
+      const remoteStream = e.streams[0];
+
+      // Mute the raw audio element (set volume to 0) to prevent double audio playback
+      // since we route it through AudioContext destination node below
       if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = e.streams[0];
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.volume = 0;
         remoteAudioRef.current.play().catch(() => {});
+      }
+
+      try {
+        const ctx = getAudioContext();
+        const source = ctx.createMediaStreamSource(remoteStream);
+        const gainNode = ctx.createGain();
+
+        gainNode.gain.setValueAtTime(speakerVolumeRef.current, ctx.currentTime);
+        speakerGainNodeRef.current = gainNode;
+
+        source.connect(gainNode);
+        gainNode.connect(ctx.destination);
+      } catch (err) {
+        console.error("Failed to build Web Audio graph for incoming stream:", err);
       }
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+        playDisconnectBeep();
         cleanup();
       }
     };
 
     return pc;
-  }, [socket]);
+  }, [socket, getAudioContext]);
 
   const cleanup = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -104,6 +191,15 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     ringtoneRef.current?.pause();
     if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+
+    // Close and reset Web Audio nodes
+    micGainNodeRef.current = null;
+    speakerGainNodeRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+
     pendingCandidates.current = [];
     callTargetIdRef.current = "";
     setCallStatus("idle");
@@ -112,18 +208,36 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     setIsMuted(false);
   }, []);
 
-  // ── Actions ──────────────────────────────────────────────────────────────
+  // ── WebRTC Actions ───────────────────────────────────────────────────────
 
   const startCall = useCallback(async (targetSocketId: string, targetUsername: string) => {
     if (!socket || callStatus !== "idle") return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
+      const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = rawStream;
 
       const pc = createPeerConnection();
       peerRef.current = pc;
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+      // Process outgoing microphone audio via Web Audio GainNode to support gain boost
+      try {
+        const ctx = getAudioContext();
+        const source = ctx.createMediaStreamSource(rawStream);
+        const gainNode = ctx.createGain();
+
+        gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
+        micGainNodeRef.current = gainNode;
+
+        const dest = ctx.createMediaStreamDestination();
+        source.connect(gainNode);
+        gainNode.connect(dest);
+
+        dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
+      } catch (err) {
+        console.error("Local audio context routing failed, falling back to raw mic:", err);
+        rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
+      }
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -137,7 +251,7 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       console.error("Failed to start call:", err);
       cleanup();
     }
-  }, [socket, callStatus, createPeerConnection, cleanup]);
+  }, [socket, callStatus, createPeerConnection, getAudioContext, cleanup]);
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall || !socket) return;
@@ -145,16 +259,33 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     ringtoneRef.current?.pause();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStreamRef.current = stream;
+      const rawStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      localStreamRef.current = rawStream;
 
       const pc = createPeerConnection();
       peerRef.current = pc;
-      stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+
+      // Process mic volume level via Web Audio
+      try {
+        const ctx = getAudioContext();
+        const source = ctx.createMediaStreamSource(rawStream);
+        const gainNode = ctx.createGain();
+
+        gainNode.gain.setValueAtTime(micGainRef.current, ctx.currentTime);
+        micGainNodeRef.current = gainNode;
+
+        const dest = ctx.createMediaStreamDestination();
+        source.connect(gainNode);
+        gainNode.connect(dest);
+
+        dest.stream.getAudioTracks().forEach((t) => pc.addTrack(t, rawStream));
+      } catch (err) {
+        console.error("Local audio context routing failed, falling back to raw mic:", err);
+        rawStream.getTracks().forEach((t) => pc.addTrack(t, rawStream));
+      }
 
       await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
 
-      // Flush buffered ICE candidates received before we set the remote description
       for (const c of pendingCandidates.current) {
         await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
       }
@@ -173,21 +304,20 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       console.error("Failed to accept call:", err);
       cleanup();
     }
-  }, [incomingCall, socket, createPeerConnection, cleanup]);
+  }, [incomingCall, socket, createPeerConnection, getAudioContext, cleanup]);
 
   const rejectCall = useCallback(() => {
     if (!incomingCall || !socket) return;
     socket.emit("call-rejected", { to: incomingCall.fromSocketId });
-    ringtoneRef.current?.pause();
-    if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
-    setIncomingCall(null);
-    setCallStatus("idle");
-  }, [incomingCall, socket]);
+    playDisconnectBeep();
+    cleanup();
+  }, [incomingCall, socket, cleanup]);
 
   const endCall = useCallback(() => {
     if (socket && callTargetIdRef.current) {
       socket.emit("call-ended", { to: callTargetIdRef.current });
     }
+    playDisconnectBeep();
     cleanup();
   }, [socket, cleanup]);
 
@@ -197,14 +327,12 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
     setIsMuted((v) => !v);
   }, []);
 
-  // ── Socket signaling listeners ───────────────────────────────────────────
-  // Re-registers whenever the socket instance changes (e.g., reconnect)
+  // ── Socket event listeners ───────────────────────────────────────────────
 
   useEffect(() => {
     if (!socket) return;
 
     const onIncomingCall = ({ from, fromUsername, offer }: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit }) => {
-      // Ignore if already in a call (read from Ref to avoid stale closure)
       if (callStatusRef.current !== "idle") {
         socket.emit("call-rejected", { to: from });
         return;
@@ -224,19 +352,25 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
         pendingCandidates.current = [];
         setCallStatus("active");
       } catch (err) {
-        console.error("Failed to process answer:", err);
+        console.error("Failed to process call answer:", err);
         cleanup();
       }
     };
 
-    const onCallRejected = () => cleanup();
-    const onCallEnded    = () => cleanup();
+    const onCallRejected = () => {
+      playDisconnectBeep();
+      cleanup();
+    };
+
+    const onCallEnded = () => {
+      playDisconnectBeep();
+      cleanup();
+    };
 
     const onIceCandidate = async ({ candidate }: { from: string; candidate: RTCIceCandidateInit }) => {
       if (peerRef.current?.remoteDescription) {
         await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       } else {
-        // Buffer until remote description is set
         pendingCandidates.current.push(candidate);
       }
     };
@@ -254,10 +388,24 @@ export function useWebRTC({ socket, socketId, username }: UseWebRTCOptions): Use
       socket.off("call-ended",    onCallEnded);
       socket.off("ice-candidate", onIceCandidate);
     };
-  }, [socket, cleanup]); // re-registers when socket instance changes
+  }, [socket, cleanup]);
 
-  // Cleanup on unmount
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
-  return { callStatus, incomingCall, isMuted, callTargetName, remoteAudioRef, startCall, acceptCall, rejectCall, endCall, toggleMute };
+  return {
+    callStatus,
+    incomingCall,
+    isMuted,
+    callTargetName,
+    remoteAudioRef,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    micGain,
+    setMicGain,
+    speakerVolume,
+    setSpeakerVolume,
+  };
 }

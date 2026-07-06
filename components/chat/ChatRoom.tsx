@@ -127,6 +127,10 @@ export default function ChatRoom({ username }: Props) {
           onToggleMute={webrtc.toggleMute}
           onEndCall={webrtc.endCall}
           remoteAudioRef={webrtc.remoteAudioRef}
+          micGain={webrtc.micGain}
+          onMicGainChange={webrtc.setMicGain}
+          speakerVolume={webrtc.speakerVolume}
+          onSpeakerVolumeChange={webrtc.setSpeakerVolume}
         />
       )}
     </div>
