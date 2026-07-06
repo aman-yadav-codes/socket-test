@@ -13,7 +13,7 @@ export interface ServerToClientEvents {
   "users-update":    (users: ChatUser[]) => void;
 
   // WebRTC signaling (received)
-  "incoming-call": (data: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit }) => void;
+  "incoming-call": (data: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
   "call-answered": (data: { from: string; answer: RTCSessionDescriptionInit }) => void;
   "call-rejected": (data: { from: string }) => void;
   "call-ended":    (data: { from: string }) => void;
@@ -27,7 +27,7 @@ export interface ClientToServerEvents {
   "get-users":    () => void;
 
   // WebRTC signaling (sent)
-  "call-user":     (data: { to: string; offer: RTCSessionDescriptionInit }) => void;
+  "call-user":     (data: { to: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
   "call-answer":   (data: { to: string; answer: RTCSessionDescriptionInit }) => void;
   "call-rejected": (data: { to: string }) => void;
   "call-ended":    (data: { to: string }) => void;

@@ -98,8 +98,8 @@ app.prepare().then(() => {
     });
 
     // ── WebRTC signaling relay (server is a dumb pipe) ──────────────────────
-    socket.on("call-user",      ({ to, offer })     => io.to(to).emit("incoming-call",  { from: socket.id, fromUsername: username, offer }));
-    socket.on("call-answer",    ({ to, answer })    => io.to(to).emit("call-answered",  { from: socket.id, answer }));
+    socket.on("call-user",      ({ to, offer, isReconnect }) => io.to(to).emit("incoming-call",  { from: socket.id, fromUsername: username, offer, isReconnect }));
+    socket.on("call-answer",    ({ to, answer })             => io.to(to).emit("call-answered",  { from: socket.id, answer }));
     socket.on("call-rejected",  ({ to })            => io.to(to).emit("call-rejected",  { from: socket.id }));
     socket.on("call-ended",     ({ to })            => io.to(to).emit("call-ended",     { from: socket.id }));
     socket.on("ice-candidate",  ({ to, candidate }) => io.to(to).emit("ice-candidate",  { from: socket.id, candidate }));

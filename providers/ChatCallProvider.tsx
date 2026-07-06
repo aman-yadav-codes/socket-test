@@ -55,6 +55,7 @@ export function ChatCallProvider({ children }: { children: React.ReactNode }) {
     socket: chatState.socket,
     socketId: chatState.socketId,
     username,
+    connectedUsers: chatState.connectedUsers,
   });
 
   return (

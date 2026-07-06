@@ -63,8 +63,8 @@ const ioHandler = (req: NextApiRequest, res: NextApiResponseServerIO) => {
       });
 
       // ── WebRTC signaling relay ──────────────────────────────────────────────
-      socket.on("call-user", ({ to, offer }) => {
-        io.to(to).emit("incoming-call", { from: socket.id, fromUsername: username, offer });
+      socket.on("call-user", ({ to, offer, isReconnect }) => {
+        io.to(to).emit("incoming-call", { from: socket.id, fromUsername: username, offer, isReconnect });
       });
       socket.on("call-answer", ({ to, answer }) => {
         io.to(to).emit("call-answered", { from: socket.id, answer });
