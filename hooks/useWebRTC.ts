@@ -174,6 +174,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
   const ringbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const ringbackAudioContextRef = useRef<AudioContext | null>(null);
+  const ringsCountRef = useRef(0);
+  const endCallRef = useRef<(() => void) | null>(null);
 
   const stopRingbackTone = useCallback(() => {
     if (ringbackIntervalRef.current) {
@@ -188,11 +190,22 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
   const startRingbackTone = useCallback(() => {
     stopRingbackTone();
+    ringsCountRef.current = 0;
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       ringbackAudioContextRef.current = ctx;
 
       const playBeep = () => {
+        ringsCountRef.current += 1;
+        if (ringsCountRef.current > 7) {
+          console.log("[WebRTC] Ringing timeout reached (7 rings). Hanging up.");
+          sessionStorage.setItem("last_call_username", callTargetNameRef.current);
+          sessionStorage.setItem("last_call_timestamp", Date.now().toString());
+          sessionStorage.setItem("last_call_reason", "no_answer");
+          endCallRef.current?.();
+          return;
+        }
+
         if (ctx.state === "suspended") ctx.resume();
         const osc1 = ctx.createOscillator();
         const osc2 = ctx.createOscillator();
@@ -484,6 +497,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     playDisconnectBeep();
     cleanup();
   }, [socket, cleanup]);
+
+  endCallRef.current = endCall;
 
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;

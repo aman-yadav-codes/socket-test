@@ -34,6 +34,7 @@ export default function ChatRoom({ username }: Props) {
   const { chat, webrtc } = useChatCall();
   const webrtcRef = useRef(webrtc);
   const [reconnectTarget, setReconnectTarget] = useState<string | null>(null);
+  const [callReason, setCallReason] = useState<string | null>(null);
 
   // Sync webrtc state ref to prevent stale closures and premature triggers in layout effects
   useEffect(() => {
@@ -44,13 +45,16 @@ export default function ChatRoom({ username }: Props) {
   useEffect(() => {
     const savedUser = sessionStorage.getItem("last_call_username");
     const savedTime = sessionStorage.getItem("last_call_timestamp");
+    const savedReason = sessionStorage.getItem("last_call_reason");
     if (savedUser && savedTime) {
       const elapsed = Date.now() - parseInt(savedTime, 10);
       if (elapsed < 5000) {
         setReconnectTarget(savedUser);
+        setCallReason(savedReason);
       } else {
         sessionStorage.removeItem("last_call_username");
         sessionStorage.removeItem("last_call_timestamp");
+        sessionStorage.removeItem("last_call_reason");
       }
     }
   }, []);
@@ -101,8 +105,10 @@ export default function ChatRoom({ username }: Props) {
 
   const handleDismissReconnect = () => {
     setReconnectTarget(null);
+    setCallReason(null);
     sessionStorage.removeItem("last_call_username");
     sessionStorage.removeItem("last_call_timestamp");
+    sessionStorage.removeItem("last_call_reason");
   };
 
   return (
@@ -177,13 +183,15 @@ export default function ChatRoom({ username }: Props) {
         </CardFooter>
       </Card>
 
-      {/* Manual Reconnect Prompt Toast (appears if user returned within 5s of disconnect) */}
+      {/* Manual Reconnect Prompt Toast (appears if user returned within 5s of disconnect or call timed out) */}
       {reconnectTarget && (
         <ReconnectToast
           targetUsername={reconnectTarget}
           isOnline={!!otherUsers.find((u) => u.username === reconnectTarget)}
           onReconnect={handleReconnect}
           onDismiss={handleDismissReconnect}
+          title={callReason === "no_answer" ? "No Answer" : "Call Disconnected"}
+          message={callReason === "no_answer" ? `${reconnectTarget} hasn't picked up the call. Wanna reconnect?` : undefined}
         />
       )}
     </div>

@@ -13,9 +13,11 @@ interface Props {
   isOnline: boolean;
   onReconnect: () => void;
   onDismiss: () => void;
+  title?: string;
+  message?: string;
 }
 
-export default function ReconnectToast({ targetUsername, isOnline, onReconnect, onDismiss }: Props) {
+export default function ReconnectToast({ targetUsername, isOnline, onReconnect, onDismiss, title, message }: Props) {
   const [timeLeft, setTimeLeft] = useState(5);
 
   useEffect(() => {
@@ -59,10 +61,16 @@ export default function ReconnectToast({ targetUsername, isOnline, onReconnect, 
 
         <div className="flex flex-col">
           <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">
-            Call Disconnected
+            {title || "Call Disconnected"}
           </p>
           <p className="font-semibold text-zinc-800 dark:text-zinc-200 text-sm mt-0.5 leading-snug">
-            Reconnect call with <span className="text-emerald-500 font-bold">{targetUsername}</span>?
+            {message ? (
+              <span>{message}</span>
+            ) : (
+              <>
+                Reconnect call with <span className="text-emerald-500 font-bold">{targetUsername}</span>?
+              </>
+            )}
           </p>
         </div>
 
