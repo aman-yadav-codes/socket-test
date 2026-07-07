@@ -59,6 +59,7 @@ export default function GlobalCallOverlays() {
           onMicGainChange={webrtc.setMicGain}
           speakerVolume={webrtc.speakerVolume}
           onSpeakerVolumeChange={webrtc.setSpeakerVolume}
+          networkQuality={webrtc.networkQuality}
         />
       )}
     </>

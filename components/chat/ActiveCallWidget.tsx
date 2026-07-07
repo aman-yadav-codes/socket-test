@@ -21,6 +21,7 @@ interface Props {
   onMicGainChange: (v: number) => void;
   speakerVolume: number;
   onSpeakerVolumeChange: (v: number) => void;
+  networkQuality: "good" | "okay" | "poor";
 }
 
 function useCallTimer() {
@@ -44,6 +45,7 @@ export default function ActiveCallWidget({
   onMicGainChange,
   speakerVolume,
   onSpeakerVolumeChange,
+  networkQuality,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const duration = useCallTimer();
@@ -223,9 +225,35 @@ export default function ActiveCallWidget({
             ))}
           </div>
 
-          <div className="flex-1 min-w-0">
-            <p className="text-white font-semibold text-sm truncate leading-tight">{name}</p>
-            <p className="text-emerald-400 text-[11px] font-mono tabular-nums">{duration}</p>
+          <div className="flex-1 min-w-0 flex items-center justify-between gap-1.5">
+            <div className="min-w-0">
+              <p className="text-white font-semibold text-sm truncate leading-tight">{name}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-emerald-400 text-[11px] font-mono tabular-nums">{duration}</span>
+                <span className="inline-flex items-center gap-1 shrink-0">
+                  <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                    networkQuality === "good" ? "bg-emerald-500 animate-pulse" :
+                    networkQuality === "okay" ? "bg-amber-500" : "bg-red-500 animate-ping"
+                  }`} />
+                  <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                    networkQuality === "good" ? "text-emerald-400" :
+                    networkQuality === "okay" ? "text-amber-400" : "text-red-400"
+                  }`}>
+                    {networkQuality}
+                  </span>
+                </span>
+              </div>
+            </div>
+            
+            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded leading-none shrink-0 ${
+              networkQuality === "good"
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                : networkQuality === "okay"
+                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                : "bg-red-500/25 text-red-400 border border-red-500/40 animate-pulse"
+            }`}>
+              {networkQuality === "poor" ? "LOW" : "HD"}
+            </span>
           </div>
 
           {/* Quick end-call button always visible */}

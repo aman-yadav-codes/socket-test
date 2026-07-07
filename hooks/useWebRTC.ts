@@ -57,6 +57,7 @@ export interface UseWebRTCReturn {
   setMicGain: (v: number) => void;
   speakerVolume: number;
   setSpeakerVolume: (v: number) => void;
+  networkQuality: "good" | "okay" | "poor";
 }
 
 // ── Studio Quality Media Constraints ─────────────────────────────────────────
@@ -160,6 +161,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
   const [micGain, setMicGain] = useState(1.0);
   const [speakerVolume, setSpeakerVolume] = useState(1.0);
+  const [networkQuality, setNetworkQuality] = useState<"good" | "okay" | "poor">("good");
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -646,6 +648,84 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     }
   }, [connectedUsers, callStatus, callTargetName, cleanup]);
 
+  // Dynamic WebRTC Network Monitoring & Codec Quality Adaptation
+  useEffect(() => {
+    if (callStatus !== "active" || !peerRef.current) {
+      setNetworkQuality("good");
+      return;
+    }
+
+    let lastPacketsLost = 0;
+    let lastPacketsReceived = 0;
+
+    const interval = setInterval(async () => {
+      const pc = peerRef.current;
+      if (!pc || pc.connectionState !== "connected") return;
+      
+      try {
+        const stats = await pc.getStats();
+        let rtt = 0;
+        let packetsLostDiff = 0;
+        let packetsReceivedDiff = 0;
+
+        stats.forEach((report) => {
+          if (report.type === "candidate-pair" && report.state === "succeeded") {
+            if (typeof report.currentRoundTripTime === "number") {
+              rtt = report.currentRoundTripTime * 1000; // ms
+            }
+          }
+          if (report.type === "inbound-rtp" && report.mediaType === "audio") {
+            const lost = report.packetsLost || 0;
+            const received = report.packetsReceived || 0;
+            
+            packetsLostDiff = lost - lastPacketsLost;
+            packetsReceivedDiff = received - lastPacketsReceived;
+            
+            lastPacketsLost = lost;
+            lastPacketsReceived = received;
+          }
+        });
+
+        const totalDiff = packetsReceivedDiff + packetsLostDiff;
+        let lossRate = 0;
+        if (totalDiff > 0) {
+          lossRate = (packetsLostDiff / totalDiff) * 100;
+        }
+
+        let quality: "good" | "okay" | "poor" = "good";
+        if (rtt > 220 || lossRate > 4) {
+          quality = "poor";
+        } else if (rtt > 90 || lossRate > 1.5) {
+          quality = "okay";
+        }
+
+        setNetworkQuality(quality);
+
+        // Dynamically throttle encoding bitrate based on network health
+        const senders = pc.getSenders();
+        const audioSender = senders.find((s) => s.track && s.track.kind === "audio");
+        if (audioSender) {
+          const parameters = audioSender.getParameters();
+          if (parameters.encodings && parameters.encodings.length > 0) {
+            const enc = parameters.encodings[0];
+            if (quality === "poor") {
+              enc.maxBitrate = 12000;
+            } else if (quality === "okay") {
+              enc.maxBitrate = 32000;
+            } else {
+              enc.maxBitrate = 64000;
+            }
+            audioSender.setParameters(parameters).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error("Failed to query WebRTC stats:", err);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [callStatus]);
+
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
   return {
@@ -663,5 +743,6 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     setMicGain,
     speakerVolume,
     setSpeakerVolume,
+    networkQuality,
   };
 }
