@@ -52,26 +52,6 @@ export default function ActiveCallWidget({
     <>
       <div
         onClick={() => setExpanded((prev) => !prev)}
-        onMouseEnter={() => {
-          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
-            setExpanded(true);
-          }
-        }}
-        onMouseLeave={() => {
-          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
-            setExpanded(false);
-          }
-        }}
-        onFocus={() => {
-          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
-            setExpanded(true);
-          }
-        }}
-        onBlur={() => {
-          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
-            setExpanded(false);
-          }
-        }}
         className={`
           fixed bottom-4 right-4 z-50
           bg-zinc-900 dark:bg-zinc-800
