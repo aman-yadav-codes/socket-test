@@ -172,6 +172,60 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   const audioContextRef = useRef<AudioContext | null>(null);
   const speakerGainNodeRef = useRef<GainNode | null>(null);
 
+  const ringbackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const ringbackAudioContextRef = useRef<AudioContext | null>(null);
+
+  const stopRingbackTone = useCallback(() => {
+    if (ringbackIntervalRef.current) {
+      clearInterval(ringbackIntervalRef.current);
+      ringbackIntervalRef.current = null;
+    }
+    if (ringbackAudioContextRef.current) {
+      ringbackAudioContextRef.current.close().catch(() => {});
+      ringbackAudioContextRef.current = null;
+    }
+  }, []);
+
+  const startRingbackTone = useCallback(() => {
+    stopRingbackTone();
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      ringbackAudioContextRef.current = ctx;
+
+      const playBeep = () => {
+        if (ctx.state === "suspended") ctx.resume();
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        osc1.type = "sine";
+        osc1.frequency.setValueAtTime(440, ctx.currentTime);
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(480, ctx.currentTime);
+
+        gainNode.gain.setValueAtTime(0.0, ctx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.05, ctx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.05, ctx.currentTime + 1.2);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
+
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc1.start();
+        osc2.start();
+
+        osc1.stop(ctx.currentTime + 1.5);
+        osc2.stop(ctx.currentTime + 1.5);
+      };
+
+      playBeep();
+      ringbackIntervalRef.current = setInterval(playBeep, 3000);
+    } catch (err) {
+      console.error("Failed to start ringback tone:", err);
+    }
+  }, [stopRingbackTone]);
+
   const speakerVolumeRef = useRef(speakerVolume);
   const remoteMicGainRef = useRef(1.0);
   const callTargetNameRef = useRef(callTargetName);
@@ -316,6 +370,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
   const cleanup = useCallback(() => {
     closeActiveConnection();
+    stopRingbackTone();
 
     ringtoneRef.current?.pause();
     if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
@@ -328,7 +383,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     setIncomingCall(null);
     setCallTargetName("");
     setIsMuted(false);
-  }, [closeActiveConnection]);
+  }, [closeActiveConnection, stopRingbackTone]);
 
   // ── WebRTC Actions ───────────────────────────────────────────────────────
 
@@ -358,13 +413,14 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       callTargetIdRef.current = targetSocketId;
       setCallTargetName(targetUsername);
       setCallStatus("calling");
+      startRingbackTone();
 
       socket.emit("call-user", { to: targetSocketId, offer: boostedOffer });
     } catch (err) {
       console.error("Failed to start call:", err);
       cleanup();
     }
-  }, [socket, callStatus, createPeerConnection, closeActiveConnection, cleanup]);
+  }, [socket, callStatus, createPeerConnection, closeActiveConnection, cleanup, startRingbackTone]);
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall || !socket) return;
@@ -452,6 +508,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
     const onCallAnswered = async ({ answer }: { from: string; answer: RTCSessionDescriptionInit }) => {
       if (!peerRef.current) return;
+      stopRingbackTone();
       try {
         const boostedAnswerSdp = boostAudioBitrate(answer.sdp || "");
         await peerRef.current.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: boostedAnswerSdp }));
