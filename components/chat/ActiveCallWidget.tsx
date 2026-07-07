@@ -79,6 +79,19 @@ export default function ActiveCallWidget({
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Bind streams reactively when they update
+  useEffect(() => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, isVideoEnabled]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, isRemoteVideoEnabled]);
+
   // Callback refs to instantly bind streams on layout shifts
   const bindLocalVideo = (el: HTMLVideoElement | null) => {
     localVideoRef.current = el;

@@ -305,9 +305,9 @@ export function useWebRTC({
   }, []);
 
   const updateSpeakerVolume = useCallback(() => {
-    if (speakerGainNodeRef.current) {
-      const computedVol = speakerVolumeRef.current * remoteMicGainRef.current;
-      speakerGainNodeRef.current.gain.setValueAtTime(computedVol, 0);
+    const computedVol = Math.min(1.0, speakerVolumeRef.current * remoteMicGainRef.current);
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.volume = computedVol;
     }
   }, []);
 
@@ -341,54 +341,11 @@ export function useWebRTC({
 
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = rStream;
-        remoteAudioRef.current.volume = 0;
-        remoteAudioRef.current.play().catch(() => {});
-      }
-
-      // Route Audio through Vocal Equalizer Context
-      if (e.track.kind === "audio") {
-        try {
-          const ctx = getAudioContext();
-          const audioTrackStream = new MediaStream([e.track]);
-          audioTrackStreamRef.current = audioTrackStream;
-
-          const src = ctx.createMediaStreamSource(audioTrackStream);
-          audioSourceNodeRef.current = src;
-
-          const gainNode = ctx.createGain();
-          speakerGainNodeRef.current = gainNode;
-
-          const lowFilter = ctx.createBiquadFilter();
-          lowFilter.type = "lowshelf";
-          lowFilter.frequency.value = 250;
-          lowFilter.gain.value = -8;
-
-          const midFilter = ctx.createBiquadFilter();
-          midFilter.type = "peaking";
-          midFilter.frequency.value = 1500;
-          midFilter.Q.value = 1.0;
-          midFilter.gain.value = 4;
-
-          const highFilter = ctx.createBiquadFilter();
-          highFilter.type = "highshelf";
-          highFilter.frequency.value = 4000;
-          highFilter.gain.value = 3;
-
-          audioFiltersRef.current = [lowFilter, midFilter, highFilter];
-
-          src.connect(lowFilter);
-          lowFilter.connect(midFilter);
-          midFilter.connect(highFilter);
-          highFilter.connect(gainNode);
-          gainNode.connect(ctx.destination);
-
-          updateSpeakerVolume();
-        } catch (err) {
-          console.error("Web Audio Equalizer routing failed:", err);
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.volume = 1.0;
-          }
-        }
+        const computedVol = Math.min(1.0, speakerVolumeRef.current * remoteMicGainRef.current);
+        remoteAudioRef.current.volume = computedVol;
+        remoteAudioRef.current.play().catch((err) => {
+          console.error("Native remote audio play failed:", err);
+        });
       }
     };
 
