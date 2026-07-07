@@ -13,10 +13,25 @@ import type { ChatSocket } from "@/lib/chatSocket";
 import type { CallStatus, IncomingCallData } from "@/types/call";
 import type { ChatUser } from "@/types/chat";
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
+const getIceServers = (): RTCIceServer[] => {
+  const stunUrl = process.env.NEXT_PUBLIC_STUN_URL || "stun:stun.l.google.com:19302";
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
+  const turnPassword = process.env.NEXT_PUBLIC_TURN_PASSWORD;
+
+  const servers: RTCIceServer[] = [{ urls: stunUrl }];
+
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl,
+      username: turnUsername,
+      credential: turnPassword,
+    });
+  }
+
+  servers.push({ urls: "stun:stun1.l.google.com:19302" });
+  return servers;
+};
 
 export interface UseWebRTCOptions {
   socket: ChatSocket | null;
@@ -224,7 +239,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   }, []);
 
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
 
     pc.onicecandidate = (e) => {
       if (e.candidate && socket && callTargetIdRef.current) {
