@@ -77,6 +77,49 @@ export default function ActiveCallWidget({
 
   const handleDragEnd = () => {
     setIsDragging(false);
+    
+    if (typeof window === "undefined" || !widgetRef.current) return;
+
+    const rect = widgetRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const margin = 16;
+    const W = rect.width;
+    const H = rect.height;
+
+    // Calculate distance to all 4 corners of the viewport
+    const distances = [
+      { corner: "tl", d: centerX * centerX + centerY * centerY },
+      { corner: "tr", d: (centerX - vw) * (centerX - vw) + centerY * centerY },
+      { corner: "bl", d: centerX * centerX + (centerY - vh) * (centerY - vh) },
+      { corner: "br", d: (centerX - vw) * (centerX - vw) + (centerY - vh) * (centerY - vh) },
+    ];
+    
+    distances.sort((a, b) => a.d - b.d);
+    const nearest = distances[0].corner;
+
+    let targetX = 0;
+    let targetY = 0;
+
+    if (nearest === "tl") {
+      targetX = -(vw - W - 2 * margin);
+      targetY = -(vh - H - 2 * margin);
+    } else if (nearest === "tr") {
+      targetX = 0;
+      targetY = -(vh - H - 2 * margin);
+    } else if (nearest === "bl") {
+      targetX = -(vw - W - 2 * margin);
+      targetY = 0;
+    } else if (nearest === "br") {
+      targetX = 0;
+      targetY = 0;
+    }
+
+    setPosition({ x: targetX, y: targetY });
   };
 
   // Bind drag event listeners to document for fluid high-speed drags
@@ -146,6 +189,9 @@ export default function ActiveCallWidget({
         }}
         style={{
           transform: `translate(${position.x}px, ${position.y}px)`,
+          transition: isDragging
+            ? "none"
+            : "transform 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.12), width 0.3s cubic-bezier(0.16, 1, 0.3, 1), padding 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
           touchAction: "none",
         }}
         className={`
@@ -153,7 +199,6 @@ export default function ActiveCallWidget({
           bg-zinc-900 dark:bg-zinc-800
           border border-zinc-700 dark:border-zinc-600
           rounded-2xl shadow-2xl
-          transition-all duration-100 ease-out
           overflow-hidden select-none
           ${isDragging ? "cursor-grabbing" : "cursor-grab"}
           ${expanded ? "w-64 p-4" : "w-48 p-3"}
