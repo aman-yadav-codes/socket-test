@@ -81,6 +81,14 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    redis: isRedisEnabled ? "connected" : "fallback-in-memory",
+    clientsCount: io.engine.clientsCount
+  });
+});
+
 // Configure Socket.IO
 const io = new Server(httpServer, {
   cors: {
