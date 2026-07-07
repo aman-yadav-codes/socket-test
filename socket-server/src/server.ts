@@ -107,6 +107,32 @@ const fallbackUserSockets = new Map<string, Set<string>>(); // username -> Set o
 const fallbackRoomMessages = new Map<string, any[]>(); // roomName -> messageArray
 const fallbackRoomUsers = new Map<string, Set<string>>(); // roomName -> Set of usernames
 
+const inCallSockets = new Set<string>(); // Set of socketIds currently in a call
+
+async function markInCall(socketId1: string, socketId2: string, inCall: boolean) {
+  if (inCall) {
+    inCallSockets.add(socketId1);
+    inCallSockets.add(socketId2);
+    if (isRedisEnabled && redisClient && redisClient.status === "ready") {
+      try {
+        await redisClient.sadd("presence:in_call_sockets", socketId1, socketId2);
+      } catch (e) {
+        console.error("Redis sadd inCallSockets error:", e);
+      }
+    }
+  } else {
+    inCallSockets.delete(socketId1);
+    inCallSockets.delete(socketId2);
+    if (isRedisEnabled && redisClient && redisClient.status === "ready") {
+      try {
+        await redisClient.srem("presence:in_call_sockets", socketId1, socketId2);
+      } catch (e) {
+        console.error("Redis srem inCallSockets error:", e);
+      }
+    }
+  }
+}
+
 // Helper: Add socket presence
 async function addPresence(socketId: string, username: string) {
   // Always update local store
@@ -130,6 +156,7 @@ async function addPresence(socketId: string, username: string) {
 async function removePresence(socketId: string, username: string) {
   // Always update local store
   fallbackActiveSockets.delete(socketId);
+  inCallSockets.delete(socketId);
   const sockets = fallbackUserSockets.get(username);
   if (sockets) {
     sockets.delete(socketId);
@@ -142,6 +169,7 @@ async function removePresence(socketId: string, username: string) {
     try {
       await redisClient.hdel("presence:sockets", socketId);
       await redisClient.srem(`presence:user_sockets:${username}`, socketId);
+      await redisClient.srem("presence:in_call_sockets", socketId);
     } catch (e) {
       console.error("Redis removePresence error:", e);
     }
@@ -149,25 +177,38 @@ async function removePresence(socketId: string, username: string) {
 }
 
 // Helper: Get users list (across all connected sockets)
-async function getUsersList(): Promise<Array<{ id: string; username: string }>> {
+async function getUsersList(): Promise<Array<{ id: string; username: string; inCall?: boolean }>> {
+  let list: Array<{ id: string; username: string }> = [];
+  let redisInCallSet = new Set<string>();
+
   if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       const data = await redisClient.hgetall("presence:sockets");
       if (Object.keys(data).length > 0) {
-        return Object.entries(data).map(([socketId, username]) => ({
+        list = Object.entries(data).map(([socketId, username]) => ({
           id: socketId,
           username
         }));
+        const inCallData = await redisClient.smembers("presence:in_call_sockets");
+        redisInCallSet = new Set(inCallData);
       }
     } catch (e) {
       console.error("Redis getUsersList error. Falling back to local store:", e);
     }
   }
 
-  // Failover to local memory store
-  return Array.from(fallbackActiveSockets.entries()).map(([id, username]) => ({
-    id,
-    username
+  if (list.length === 0) {
+    // Failover to local memory store
+    list = Array.from(fallbackActiveSockets.entries()).map(([id, username]) => ({
+      id,
+      username
+    }));
+  }
+
+  // Attach inCall status
+  return list.map((user) => ({
+    ...user,
+    inCall: redisInCallSet.size > 0 ? redisInCallSet.has(user.id) : inCallSockets.has(user.id)
   }));
 }
 
@@ -314,6 +355,23 @@ io.on("connection", async (socket: Socket) => {
     io.to(room).emit("receive-message", messageEntry);
   });
 
+  // Handle call logging
+  socket.on("log-call", async ({ room, callDetails }: { room: string; callDetails: any }) => {
+    const cleanRoom = room || socket.data.room || "general";
+    const messageEntry = {
+      id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      text: `${callDetails.caller} called ${callDetails.receiver} (${callDetails.status === "answered" ? callDetails.duration : callDetails.status})`,
+      sender: "System",
+      timestamp: new Date().toISOString(),
+      room: cleanRoom,
+      type: "call",
+      callDetails
+    };
+
+    await persistMessage(cleanRoom, messageEntry);
+    io.to(cleanRoom).emit("receive-message", messageEntry);
+  });
+
   // Handle typing indicators
   socket.on("typing", (isTyping: boolean) => {
     const room = socket.data.room || "general";
@@ -354,7 +412,11 @@ io.on("connection", async (socket: Socket) => {
     });
   });
 
-  socket.on("call-answer", ({ to, answer }) => {
+  socket.on("call-answer", async ({ to, answer }) => {
+    await markInCall(socket.id, to, true);
+    const users = await getUsersList();
+    io.emit("users-update", users);
+
     io.to(to).emit("call-answered", {
       from: socket.id,
       answer
@@ -367,7 +429,11 @@ io.on("connection", async (socket: Socket) => {
     });
   });
 
-  socket.on("call-ended", ({ to }) => {
+  socket.on("call-ended", async ({ to }) => {
+    await markInCall(socket.id, to, false);
+    const users = await getUsersList();
+    io.emit("users-update", users);
+
     io.to(to).emit("call-ended", {
       from: socket.id
     });

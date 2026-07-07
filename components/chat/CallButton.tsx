@@ -74,14 +74,28 @@ export default function CallButton({ users, callStatus, onCall, onEndCall }: Pro
           {users.map((u) => (
             <button
               key={u.id}
-              onClick={() => { onCall(u.id, u.username); setOpen(false); }}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm text-left transition-colors cursor-pointer"
+              disabled={u.inCall}
+              onClick={() => {
+                onCall(u.id, u.username);
+                setOpen(false);
+              }}
+              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-left transition-colors ${
+                u.inCall
+                  ? "opacity-50 cursor-not-allowed bg-zinc-50 dark:bg-zinc-800/50"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+              }`}
             >
-              <span className="h-6 w-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+              <span className={`h-6 w-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                u.inCall ? "bg-zinc-400 dark:bg-zinc-650" : "bg-emerald-500"
+              }`}>
                 {u.username[0].toUpperCase()}
               </span>
               <span className="truncate font-medium">{u.username}</span>
-              <PhoneCall className="h-3 w-3 text-emerald-500 ml-auto shrink-0" />
+              {u.inCall ? (
+                <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 ml-auto shrink-0 uppercase tracking-wider">Busy</span>
+              ) : (
+                <PhoneCall className="h-3 w-3 text-emerald-500 ml-auto shrink-0" />
+              )}
             </button>
           ))}
         </div>

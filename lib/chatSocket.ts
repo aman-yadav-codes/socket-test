@@ -49,6 +49,7 @@ export interface ClientToServerEvents {
   "call-ended":    (data: { to: string }) => void;
   "ice-candidate": (data: { to: string; candidate: RTCIceCandidateInit }) => void;
   "mic-gain-change": (data: { to: string; gain: number }) => void;
+  "log-call":      (data: { room: string; callDetails: any }) => void;
 }
 
 export type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

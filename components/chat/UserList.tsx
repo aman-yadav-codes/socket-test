@@ -30,13 +30,18 @@ export default function UserList({ users, socketId }: Props) {
             <Badge
               key={user.id}
               variant={isSelf ? "default" : "outline"}
-              className={`text-[10px] px-2 py-0.5 font-mono transition-colors ${
+              className={`text-[10px] px-2 py-0.5 font-mono transition-colors flex items-center gap-1 ${
                 isSelf
                   ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                  : user.inCall
+                  ? "border-emerald-500 text-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20"
                   : "text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
               }`}
             >
               {isSelf ? `You (${user.username})` : user.username}
+              {user.inCall && (
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Ongoing call" />
+              )}
             </Badge>
           );
         })}

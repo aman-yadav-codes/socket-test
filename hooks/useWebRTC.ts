@@ -176,6 +176,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   const ringbackAudioContextRef = useRef<AudioContext | null>(null);
   const ringsCountRef = useRef(0);
   const endCallRef = useRef<(() => void) | null>(null);
+  const isCallerRef = useRef(false);
+  const callStartTimestampRef = useRef<number | null>(null);
 
   const stopRingbackTone = useCallback(() => {
     if (ringbackIntervalRef.current) {
@@ -382,8 +384,41 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   }, []);
 
   const cleanup = useCallback(() => {
+    // Log call details on caller's side before clearing targets
+    if (isCallerRef.current && socket && callTargetNameRef.current) {
+      const elapsed = callStartTimestampRef.current ? Date.now() - callStartTimestampRef.current : 0;
+      const isAnswered = elapsed > 0;
+      let status: "answered" | "missed" | "declined" = "missed";
+      let durationStr: string | undefined;
+
+      if (isAnswered) {
+        status = "answered";
+        const totalSecs = Math.floor(elapsed / 1000);
+        const mm = String(Math.floor(totalSecs / 60)).padStart(2, "0");
+        const ss = String(totalSecs % 60).padStart(2, "0");
+        durationStr = `${mm}:${ss}`;
+      } else {
+        const savedReason = sessionStorage.getItem("last_call_reason");
+        status = savedReason === "declined" ? "declined" : "missed";
+      }
+
+      socket.emit("log-call", {
+        room: "",
+        callDetails: {
+          caller: username,
+          receiver: callTargetNameRef.current,
+          status,
+          duration: durationStr
+        }
+      });
+    }
+
     closeActiveConnection();
     stopRingbackTone();
+
+    // Reset caller status
+    isCallerRef.current = false;
+    callStartTimestampRef.current = null;
 
     ringtoneRef.current?.pause();
     if (ringtoneRef.current) ringtoneRef.current.currentTime = 0;
@@ -396,7 +431,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
     setIncomingCall(null);
     setCallTargetName("");
     setIsMuted(false);
-  }, [closeActiveConnection, stopRingbackTone]);
+  }, [closeActiveConnection, stopRingbackTone, socket, username]);
 
   // ── WebRTC Actions ───────────────────────────────────────────────────────
 
@@ -427,6 +462,8 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       setCallTargetName(targetUsername);
       setCallStatus("calling");
       startRingbackTone();
+      isCallerRef.current = true;
+      callStartTimestampRef.current = null;
 
       socket.emit("call-user", { to: targetSocketId, offer: boostedOffer });
     } catch (err) {
@@ -533,6 +570,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
         pendingCandidates.current = [];
         setCallStatus("active");
         playConnectBeep();
+        callStartTimestampRef.current = Date.now();
 
         socket.emit("mic-gain-change", { to: callTargetIdRef.current, gain: micGain });
       } catch (err) {

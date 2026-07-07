@@ -4,6 +4,7 @@
 export interface ChatUser {
   id: string;
   username: string;
+  inCall?: boolean;
 }
 
 export interface ChatMessage {
@@ -14,4 +15,11 @@ export interface ChatMessage {
   timestamp: string;
   room?: string;
   status?: "sent" | "delivered" | "read";
+  type?: "text" | "call";
+  callDetails?: {
+    caller: string;
+    receiver: string;
+    status: "answered" | "missed" | "declined";
+    duration?: string;
+  };
 }

@@ -1,11 +1,6 @@
-/**
- * MessageBubble.tsx
- * A single chat message bubble.
- * Uses forwardRef so the parent (MessageList) can store a DOM ref keyed by message.id,
- * enabling the scroll-to-message + highlight feature triggered by toast clicks.
- */
 import { forwardRef } from "react";
 import type { ChatMessage } from "@/types/chat";
+import { Phone, PhoneCall, PhoneMissed, PhoneOff } from "lucide-react";
 
 interface Props {
   message: ChatMessage;
@@ -14,6 +9,57 @@ interface Props {
 }
 
 const MessageBubble = forwardRef<HTMLDivElement, Props>(({ message, isSelf }, ref) => {
+  const isCall = message.type === "call";
+
+  if (isCall && message.callDetails) {
+    const { caller, receiver, status, duration } = message.callDetails;
+    
+    // Choose icon and styles based on call outcome
+    let Icon = Phone;
+    let iconColor = "text-emerald-500";
+    let statusText = "Voice Call";
+    let bgClass = "bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800";
+
+    if (status === "missed") {
+      Icon = PhoneMissed;
+      iconColor = "text-amber-500";
+      statusText = "Missed Call";
+    } else if (status === "declined") {
+      Icon = PhoneOff;
+      iconColor = "text-red-500";
+      statusText = "Declined Call";
+    } else if (status === "answered") {
+      Icon = PhoneCall;
+      iconColor = "text-emerald-500";
+      statusText = `Voice Call (${duration || "00:00"})`;
+    }
+
+    return (
+      <div
+        ref={ref}
+        className={`p-3 rounded-2xl animate-msg flex items-center gap-3 self-center max-w-[90%] shadow-sm ${bgClass}`}
+      >
+        <div className={`p-2 rounded-xl bg-zinc-100/80 dark:bg-zinc-800 shrink-0 ${iconColor}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="flex flex-col min-w-0">
+          <p className="font-semibold text-[10px] text-zinc-500 dark:text-zinc-400 uppercase tracking-wider leading-none">
+            {statusText}
+          </p>
+          <p className="text-sm text-zinc-800 dark:text-zinc-200 mt-1 font-medium leading-tight">
+            {caller} called <span className="font-bold">{receiver}</span>
+          </p>
+          <span className="text-[9px] text-zinc-400 tabular-nums mt-1 select-none">
+            {new Date(message.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={ref}
