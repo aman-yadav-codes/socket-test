@@ -335,6 +335,12 @@ export function useWebRTC({
       const rStream = e.streams[0];
       setRemoteStream(rStream);
 
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = rStream;
+        remoteAudioRef.current.volume = 0;
+        remoteAudioRef.current.play().catch(() => {});
+      }
+
       // Route Audio through Vocal Equalizer Context
       if (e.track.kind === "audio") {
         try {
