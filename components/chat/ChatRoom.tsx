@@ -100,7 +100,7 @@ export default function ChatRoom({ username }: Props) {
     if (!reconnectTarget) return;
     const targetUser = otherUsers.find((u) => u.username === reconnectTarget);
     if (targetUser) {
-      webrtc.startCall(targetUser.id, targetUser.username);
+      webrtc.startCall(targetUser.id, targetUser.username, "audio");
     } else {
       alert(`${reconnectTarget} is offline.`);
     }

@@ -51,10 +51,20 @@ export default function GlobalCallOverlays() {
       {webrtc.callStatus === "active" && (
         <ActiveCallWidget
           name={webrtc.callTargetName}
+          callType={webrtc.callType}
           isMuted={webrtc.isMuted}
+          isVideoEnabled={webrtc.isVideoEnabled}
+          isRemoteVideoEnabled={webrtc.isRemoteVideoEnabled}
           onToggleMute={webrtc.toggleMute}
+          onToggleVideo={webrtc.toggleVideo}
           onEndCall={webrtc.endCall}
           remoteAudioRef={webrtc.remoteAudioRef}
+          localStream={webrtc.localStream}
+          remoteStream={webrtc.remoteStream}
+          incomingUpgradeRequest={webrtc.incomingUpgradeRequest}
+          onRequestUpgrade={webrtc.requestVideoUpgrade}
+          onRespondUpgrade={webrtc.respondVideoUpgrade}
+          stats={webrtc.stats}
           micGain={webrtc.micGain}
           onMicGainChange={webrtc.setMicGain}
           speakerVolume={webrtc.speakerVolume}
