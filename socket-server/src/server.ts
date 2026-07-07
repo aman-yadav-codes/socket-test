@@ -30,15 +30,12 @@ if (REDIS_URL) {
   try {
     console.log(`Connecting to Redis at: ${REDIS_URL}`);
     redisClient = new Redis(REDIS_URL, {
-      maxRetriesPerRequest: 3,
-      retryStrategy(times) {
-        if (times > 3) {
-          console.warn("Redis connection failed. Falling back to in-memory mode.");
-          return null; // stop retrying and trigger error
-        }
-        return Math.min(times * 100, 2000);
-      }
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true
     });
+
+    redisPub = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
+    redisSub = redisPub.duplicate();
 
     redisClient.on("connect", () => {
       console.log("Redis main client connected successfully.");
@@ -50,9 +47,8 @@ if (REDIS_URL) {
       isRedisEnabled = false;
     });
 
-    // Create duplicate connections for Socket.IO redis adapter
-    redisPub = new Redis(REDIS_URL);
-    redisSub = redisPub.duplicate();
+    redisPub.on("error", (err) => console.error("Redis Pub error:", err.message));
+    redisSub.on("error", (err) => console.error("Redis Sub error:", err.message));
   } catch (err) {
     console.error("Failed to initialize Redis clients:", err);
   }
@@ -99,8 +95,8 @@ const io = new Server(httpServer, {
   pingInterval: 25000
 });
 
-// Attach Redis Adapter for horizontal scaling if Redis is connected
-if (isRedisEnabled && redisPub && redisSub) {
+// Attach Redis Adapter for horizontal scaling if Redis is configured
+if (REDIS_URL && redisPub && redisSub) {
   io.adapter(createAdapter(redisPub, redisSub));
   console.log("Socket.IO Redis adapter attached.");
 }
@@ -113,71 +109,81 @@ const fallbackRoomUsers = new Map<string, Set<string>>(); // roomName -> Set of 
 
 // Helper: Add socket presence
 async function addPresence(socketId: string, username: string) {
-  if (isRedisEnabled && redisClient) {
+  // Always update local store
+  fallbackActiveSockets.set(socketId, username);
+  if (!fallbackUserSockets.has(username)) {
+    fallbackUserSockets.set(username, new Set());
+  }
+  fallbackUserSockets.get(username)!.add(socketId);
+
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       await redisClient.hset("presence:sockets", socketId, username);
       await redisClient.sadd(`presence:user_sockets:${username}`, socketId);
     } catch (e) {
       console.error("Redis addPresence error:", e);
     }
-  } else {
-    fallbackActiveSockets.set(socketId, username);
-    if (!fallbackUserSockets.has(username)) {
-      fallbackUserSockets.set(username, new Set());
-    }
-    fallbackUserSockets.get(username)!.add(socketId);
   }
 }
 
 // Helper: Remove socket presence
 async function removePresence(socketId: string, username: string) {
-  if (isRedisEnabled && redisClient) {
+  // Always update local store
+  fallbackActiveSockets.delete(socketId);
+  const sockets = fallbackUserSockets.get(username);
+  if (sockets) {
+    sockets.delete(socketId);
+    if (sockets.size === 0) {
+      fallbackUserSockets.delete(username);
+    }
+  }
+
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       await redisClient.hdel("presence:sockets", socketId);
       await redisClient.srem(`presence:user_sockets:${username}`, socketId);
-      const remaining = await redisClient.scard(`presence:user_sockets:${username}`);
-      if (remaining === 0) {
-        // user fully offline
-      }
     } catch (e) {
       console.error("Redis removePresence error:", e);
-    }
-  } else {
-    fallbackActiveSockets.delete(socketId);
-    const sockets = fallbackUserSockets.get(username);
-    if (sockets) {
-      sockets.delete(socketId);
-      if (sockets.size === 0) {
-        fallbackUserSockets.delete(username);
-      }
     }
   }
 }
 
 // Helper: Get users list (across all connected sockets)
 async function getUsersList(): Promise<Array<{ id: string; username: string }>> {
-  if (isRedisEnabled && redisClient) {
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       const data = await redisClient.hgetall("presence:sockets");
-      return Object.entries(data).map(([socketId, username]) => ({
-        id: socketId,
-        username
-      }));
+      if (Object.keys(data).length > 0) {
+        return Object.entries(data).map(([socketId, username]) => ({
+          id: socketId,
+          username
+        }));
+      }
     } catch (e) {
-      console.error("Redis getUsersList error:", e);
-      return [];
+      console.error("Redis getUsersList error. Falling back to local store:", e);
     }
-  } else {
-    return Array.from(fallbackActiveSockets.entries()).map(([id, username]) => ({
-      id,
-      username
-    }));
   }
+
+  // Failover to local memory store
+  return Array.from(fallbackActiveSockets.entries()).map(([id, username]) => ({
+    id,
+    username
+  }));
 }
 
 // Helper: Store and get chat messages
 async function persistMessage(room: string, message: any) {
-  if (isRedisEnabled && redisClient) {
+  // Always update local store
+  if (!fallbackRoomMessages.has(room)) {
+    fallbackRoomMessages.set(room, []);
+  }
+  const msgs = fallbackRoomMessages.get(room)!;
+  msgs.push(message);
+  if (msgs.length > 200) {
+    msgs.splice(0, msgs.length - 200);
+  }
+
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       const key = `chat:messages:${room}`;
       await redisClient.rpush(key, JSON.stringify(message));
@@ -185,31 +191,24 @@ async function persistMessage(room: string, message: any) {
     } catch (e) {
       console.error("Redis persistMessage error:", e);
     }
-  } else {
-    if (!fallbackRoomMessages.has(room)) {
-      fallbackRoomMessages.set(room, []);
-    }
-    const msgs = fallbackRoomMessages.get(room)!;
-    msgs.push(message);
-    if (msgs.length > 200) {
-      msgs.splice(0, msgs.length - 200);
-    }
   }
 }
 
 async function getMessageHistory(room: string): Promise<any[]> {
-  if (isRedisEnabled && redisClient) {
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
     try {
       const key = `chat:messages:${room}`;
       const data = await redisClient.lrange(key, 0, -1);
-      return data.map((item) => JSON.parse(item));
+      if (data && data.length > 0) {
+        return data.map((item) => JSON.parse(item));
+      }
     } catch (e) {
-      console.error("Redis getMessageHistory error:", e);
-      return [];
+      console.error("Redis getMessageHistory error. Falling back to local store:", e);
     }
-  } else {
-    return fallbackRoomMessages.get(room) || [];
   }
+
+  // Failover to local memory store
+  return fallbackRoomMessages.get(room) || [];
 }
 
 // Socket JWT authentication middleware
