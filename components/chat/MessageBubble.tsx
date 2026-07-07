@@ -20,7 +20,17 @@ const MessageBubble = forwardRef<HTMLDivElement, Props>(({ message, isSelf }, re
     let statusText = "Voice Call";
     let bgClass = "bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800";
 
-    if (status === "missed") {
+    if (status === "calling") {
+      Icon = Phone;
+      iconColor = "text-emerald-500 animate-pulse";
+      statusText = "Calling...";
+      bgClass = "bg-emerald-50/20 dark:bg-emerald-950/10 border border-emerald-500/20 animate-pulse";
+    } else if (status === "active") {
+      Icon = PhoneCall;
+      iconColor = "text-emerald-500 animate-bounce";
+      statusText = "Ongoing Call";
+      bgClass = "bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-500/40 shadow-sm";
+    } else if (status === "missed") {
       Icon = PhoneMissed;
       iconColor = "text-amber-500";
       statusText = "Missed Call";

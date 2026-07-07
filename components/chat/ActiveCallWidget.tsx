@@ -8,7 +8,7 @@
  */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Mic, MicOff, PhoneOff, Volume2 } from "lucide-react";
 
 interface Props {
@@ -47,10 +47,24 @@ export default function ActiveCallWidget({
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const duration = useCallTimer();
+  const widgetRef = useRef<HTMLDivElement>(null);
+
+  // Collapse widget on click/tap outside
+  useEffect(() => {
+    if (!expanded) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (widgetRef.current && !widgetRef.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [expanded]);
 
   return (
     <>
       <div
+        ref={widgetRef}
         onClick={() => setExpanded((prev) => !prev)}
         className={`
           fixed bottom-4 right-4 z-50

@@ -19,7 +19,7 @@ export interface ChatMessage {
   callDetails?: {
     caller: string;
     receiver: string;
-    status: "answered" | "missed" | "declined";
+    status: "calling" | "active" | "answered" | "missed" | "declined";
     duration?: string;
   };
 }

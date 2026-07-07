@@ -212,6 +212,73 @@ async function getUsersList(): Promise<Array<{ id: string; username: string; inC
   }));
 }
 
+function getCallStatusText(details: any) {
+  const { caller, receiver, status, duration } = details;
+  if (status === "calling") {
+    return `${caller} is calling ${receiver}...`;
+  } else if (status === "active") {
+    return `Ongoing Call: ${caller} in a call with ${receiver}`;
+  } else if (status === "answered") {
+    return `Voice Call: ${caller} called ${receiver} (${duration || "00:00"})`;
+  } else if (status === "declined") {
+    return `Declined Call: ${caller} called ${receiver}`;
+  } else if (status === "missed") {
+    return `Missed Call: ${caller} called ${receiver}`;
+  }
+  return `${caller} called ${receiver}`;
+}
+
+async function updateCallMessage(room: string, callId: string, updatedDetails: any) {
+  const msgs = fallbackRoomMessages.get(room) || [];
+  const msgIdx = msgs.findIndex((m) => m.id === callId);
+  let msg: any = null;
+
+  if (msgIdx !== -1) {
+    msg = msgs[msgIdx];
+    msg.callDetails = { ...msg.callDetails, ...updatedDetails };
+    msg.text = getCallStatusText(msg.callDetails);
+  } else {
+    msg = {
+      id: callId,
+      text: getCallStatusText(updatedDetails),
+      sender: "System",
+      timestamp: new Date().toISOString(),
+      room,
+      type: "call",
+      callDetails: updatedDetails
+    };
+    msgs.push(msg);
+    if (msgs.length > 200) {
+      msgs.splice(0, msgs.length - 200);
+    }
+  }
+  fallbackRoomMessages.set(room, msgs);
+
+  if (isRedisEnabled && redisClient && redisClient.status === "ready") {
+    try {
+      const key = `chat:messages:${room}`;
+      const allData = await redisClient.lrange(key, 0, -1);
+      const parsed = allData.map((item: string) => JSON.parse(item));
+      const rIdx = parsed.findIndex((m: any) => m.id === callId);
+
+      if (rIdx !== -1) {
+        parsed[rIdx] = msg;
+        await redisClient.del(key);
+        for (const m of parsed) {
+          await redisClient.rpush(key, JSON.stringify(m));
+        }
+      } else {
+        await redisClient.rpush(key, JSON.stringify(msg));
+        await redisClient.ltrim(key, -200, -1);
+      }
+    } catch (e) {
+      console.error("Redis updateCallMessage error:", e);
+    }
+  }
+
+  return msg;
+}
+
 // Helper: Store and get chat messages
 async function persistMessage(room: string, message: any) {
   // Always update local store
@@ -355,21 +422,26 @@ io.on("connection", async (socket: Socket) => {
     io.to(room).emit("receive-message", messageEntry);
   });
 
-  // Handle call logging
-  socket.on("log-call", async ({ room, callDetails }: { room: string; callDetails: any }) => {
-    const cleanRoom = room || socket.data.room || "general";
-    const messageEntry = {
-      id: `call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      text: `${callDetails.caller} called ${callDetails.receiver} (${callDetails.status === "answered" ? callDetails.duration : callDetails.status})`,
-      sender: "System",
-      timestamp: new Date().toISOString(),
-      room: cleanRoom,
-      type: "call",
-      callDetails
+  // Handle realtime call status tracking and message updates
+  socket.on("update-call-status", async ({ callId, status, caller, receiver, duration }) => {
+    const room = socket.data.room || "general";
+    
+    // Fetch existing details if caller/receiver omitted in subsequent status transition events
+    const msgs = fallbackRoomMessages.get(room) || [];
+    const existingMsg = msgs.find((m) => m.id === callId);
+    
+    const finalCaller = caller || (existingMsg && existingMsg.callDetails ? existingMsg.callDetails.caller : "User");
+    const finalReceiver = receiver || (existingMsg && existingMsg.callDetails ? existingMsg.callDetails.receiver : "User");
+
+    const callDetails = {
+      caller: finalCaller,
+      receiver: finalReceiver,
+      status,
+      duration
     };
 
-    await persistMessage(cleanRoom, messageEntry);
-    io.to(cleanRoom).emit("receive-message", messageEntry);
+    const updatedMsg = await updateCallMessage(room, callId, callDetails);
+    io.to(room).emit("receive-message", updatedMsg);
   });
 
   // Handle typing indicators

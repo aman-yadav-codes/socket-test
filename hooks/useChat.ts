@@ -216,6 +216,14 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
       if (msg.room && msg.room !== room) return; // Ignore if message is for another room
       
       setMessages((prev) => {
+        // If a message with the exact same ID already exists, update it in-place (handles live call status updates!)
+        const exactIdx = prev.findIndex((m) => m.id === msg.id);
+        if (exactIdx !== -1) {
+          const next = [...prev];
+          next[exactIdx] = msg;
+          return next;
+        }
+
         // Replace optimistic placeholder from same sender with canonical server copy
         const idx = prev.findIndex(
           (m) =>
@@ -233,7 +241,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
       });
 
       // Send receipts for messages from other users
-      if (msg.sender !== username) {
+      if (msg.sender !== username && msg.sender !== "System") {
         socket.emit("message-delivered", { messageId: msg.id, senderName: msg.sender, room: msg.room || "general" });
         socket.emit("message-read", { messageId: msg.id, senderName: msg.sender, room: msg.room || "general" });
         playSound();

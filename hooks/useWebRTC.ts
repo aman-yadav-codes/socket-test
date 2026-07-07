@@ -178,6 +178,7 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
   const endCallRef = useRef<(() => void) | null>(null);
   const isCallerRef = useRef(false);
   const callStartTimestampRef = useRef<number | null>(null);
+  const callIdRef = useRef<string>("");
 
   const stopRingbackTone = useCallback(() => {
     if (ringbackIntervalRef.current) {
@@ -402,14 +403,10 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
         status = savedReason === "declined" ? "declined" : "missed";
       }
 
-      socket.emit("log-call", {
-        room: "",
-        callDetails: {
-          caller: username,
-          receiver: callTargetNameRef.current,
-          status,
-          duration: durationStr
-        }
+      socket.emit("update-call-status", {
+        callId: callIdRef.current,
+        status,
+        duration: durationStr
       });
     }
 
@@ -462,8 +459,18 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
       setCallTargetName(targetUsername);
       setCallStatus("calling");
       startRingbackTone();
+
+      const callId = `call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      callIdRef.current = callId;
       isCallerRef.current = true;
       callStartTimestampRef.current = null;
+
+      socket.emit("update-call-status", {
+        callId,
+        status: "calling",
+        caller: username,
+        receiver: targetUsername
+      });
 
       socket.emit("call-user", { to: targetSocketId, offer: boostedOffer });
     } catch (err) {
@@ -571,6 +578,11 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
         setCallStatus("active");
         playConnectBeep();
         callStartTimestampRef.current = Date.now();
+
+        socket.emit("update-call-status", {
+          callId: callIdRef.current,
+          status: "active"
+        });
 
         socket.emit("mic-gain-change", { to: callTargetIdRef.current, gain: micGain });
       } catch (err) {
