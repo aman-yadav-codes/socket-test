@@ -41,23 +41,27 @@ export default function ChatRoom({ username }: Props) {
     webrtcRef.current = webrtc;
   }, [webrtc]);
 
+  const callStatus = webrtc?.callStatus;
+
   // Check if we just disconnected from a call under 5 seconds ago
   useEffect(() => {
-    const savedUser = sessionStorage.getItem("last_call_username");
-    const savedTime = sessionStorage.getItem("last_call_timestamp");
-    const savedReason = sessionStorage.getItem("last_call_reason");
-    if (savedUser && savedTime) {
-      const elapsed = Date.now() - parseInt(savedTime, 10);
-      if (elapsed < 5000) {
-        setReconnectTarget(savedUser);
-        setCallReason(savedReason);
-      } else {
-        sessionStorage.removeItem("last_call_username");
-        sessionStorage.removeItem("last_call_timestamp");
-        sessionStorage.removeItem("last_call_reason");
+    if (callStatus === "idle") {
+      const savedUser = sessionStorage.getItem("last_call_username");
+      const savedTime = sessionStorage.getItem("last_call_timestamp");
+      const savedReason = sessionStorage.getItem("last_call_reason");
+      if (savedUser && savedTime) {
+        const elapsed = Date.now() - parseInt(savedTime, 10);
+        if (elapsed < 5000) {
+          setReconnectTarget(savedUser);
+          setCallReason(savedReason);
+        } else {
+          sessionStorage.removeItem("last_call_username");
+          sessionStorage.removeItem("last_call_timestamp");
+          sessionStorage.removeItem("last_call_reason");
+        }
       }
     }
-  }, []);
+  }, [callStatus]);
 
   // Handle page reload/refresh beforeunload: if a call is active/calling, save the target state
   useEffect(() => {
