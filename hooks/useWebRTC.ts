@@ -691,33 +691,7 @@ export function useWebRTC({
           quality,
         });
 
-        // Auto Quality Adaptation
-        const videoSender = peerRef.current.getSenders().find((s) => s.track && s.track.kind === "video");
-        if (videoSender && videoSender.track) {
-          const params = videoSender.getParameters();
-          if (!params.encodings) params.encodings = [{}];
-
-          if (quality === "Excellent" || quality === "Good") {
-            params.encodings[0].maxBitrate = 1500000;
-            params.encodings[0].scaleResolutionDownBy = 1.0;
-            videoSender.track.enabled = true;
-          } else if (quality === "Fair") {
-            params.encodings[0].maxBitrate = 600000;
-            params.encodings[0].scaleResolutionDownBy = 1.5;
-            videoSender.track.enabled = true;
-          } else if (quality === "Weak") {
-            params.encodings[0].maxBitrate = 250000;
-            params.encodings[0].scaleResolutionDownBy = 2.0;
-            videoSender.track.enabled = true;
-          } else {
-            params.encodings[0].maxBitrate = 100000;
-            params.encodings[0].scaleResolutionDownBy = 3.0;
-            if (packetLoss > 20 || rtt > 500) {
-              videoSender.track.enabled = false;
-            }
-          }
-          await videoSender.setParameters(params).catch(() => {});
-        }
+        // Let native WebRTC Google Congestion Control (GCC) handle optimal bitrates and scaling smoothly
       } catch (err) {
         console.error("Stats loop error:", err);
       }
