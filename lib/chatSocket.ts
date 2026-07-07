@@ -3,7 +3,6 @@
  */
 import { io, Socket } from "socket.io-client";
 import type { ChatMessage, ChatUser } from "@/types/chat";
-import type { CallType } from "@/types/call";
 
 // ── Event maps ──────────────────────────────────────────────────────────────
 
@@ -19,16 +18,13 @@ export interface ServerToClientEvents {
   // Receipts
   "message-status-update": (data: { messageId: string; status: "sent" | "delivered" | "read"; room: string }) => void;
 
-  // WebRTC generic signaling (received)
-  "call:start": (data: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit; callType: CallType }) => void;
-  "call:answer": (data: { from: string; answer: RTCSessionDescriptionInit }) => void;
-  "call:reject": (data: { from: string }) => void;
-  "call:end":    (data: { from: string }) => void;
-  "call:ice-candidate": (data: { from: string; candidate: RTCIceCandidateInit }) => void;
-  "call:mic-gain": (data: { gain: number }) => void;
-  "call:media-toggle": (data: { from: string; audioEnabled: boolean; videoEnabled: boolean }) => void;
-  "call:upgrade-request": (data: { from: string; offer: RTCSessionDescriptionInit }) => void;
-  "call:upgrade-response": (data: { from: string; answer?: RTCSessionDescriptionInit; accepted: boolean }) => void;
+  // WebRTC signaling (received)
+  "incoming-call": (data: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
+  "call-answered": (data: { from: string; answer: RTCSessionDescriptionInit }) => void;
+  "call-rejected": (data: { from: string }) => void;
+  "call-ended":    (data: { from: string }) => void;
+  "ice-candidate": (data: { from: string; candidate: RTCIceCandidateInit }) => void;
+  "mic-gain-change": (data: { gain: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -46,16 +42,13 @@ export interface ClientToServerEvents {
   "message-delivered": (data: { messageId: string; senderName: string; room: string }) => void;
   "message-read":      (data: { messageId: string; senderName: string; room: string }) => void;
 
-  // WebRTC generic signaling (sent)
-  "call:start":     (data: { to: string; offer: RTCSessionDescriptionInit; callType: CallType }) => void;
-  "call:answer":   (data: { to: string; answer: RTCSessionDescriptionInit }) => void;
-  "call:reject": (data: { to: string }) => void;
-  "call:end":    (data: { to: string }) => void;
-  "call:ice-candidate": (data: { to: string; candidate: RTCIceCandidateInit }) => void;
-  "call:mic-gain": (data: { to: string; gain: number }) => void;
-  "call:media-toggle": (data: { to: string; audioEnabled: boolean; videoEnabled: boolean }) => void;
-  "call:upgrade-request": (data: { to: string; offer: RTCSessionDescriptionInit }) => void;
-  "call:upgrade-response": (data: { to: string; answer?: RTCSessionDescriptionInit; accepted: boolean }) => void;
+  // WebRTC signaling (sent)
+  "call-user":     (data: { to: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
+  "call-answer":   (data: { to: string; answer: RTCSessionDescriptionInit }) => void;
+  "call-rejected": (data: { to: string }) => void;
+  "call-ended":    (data: { to: string }) => void;
+  "ice-candidate": (data: { to: string; candidate: RTCIceCandidateInit }) => void;
+  "mic-gain-change": (data: { to: string; gain: number }) => void;
 }
 
 export type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

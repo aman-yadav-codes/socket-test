@@ -344,68 +344,45 @@ io.on("connection", async (socket: Socket) => {
     });
   });
 
-  // --- WebRTC generic signaling relay (server is a dumb pipe) ---
-  socket.on("call:start", ({ to, offer, callType }) => {
-    io.to(to).emit("call:start", {
+  // --- WebRTC signaling relay (server is a dumb pipe) ---
+  socket.on("call-user", ({ to, offer, isReconnect }) => {
+    io.to(to).emit("incoming-call", {
       from: socket.id,
       fromUsername: username,
       offer,
-      callType
+      isReconnect
     });
   });
 
-  socket.on("call:answer", ({ to, answer }) => {
-    io.to(to).emit("call:answer", {
+  socket.on("call-answer", ({ to, answer }) => {
+    io.to(to).emit("call-answered", {
       from: socket.id,
       answer
     });
   });
 
-  socket.on("call:reject", ({ to }) => {
-    io.to(to).emit("call:reject", {
+  socket.on("call-rejected", ({ to }) => {
+    io.to(to).emit("call-rejected", {
       from: socket.id
     });
   });
 
-  socket.on("call:end", ({ to }) => {
-    io.to(to).emit("call:end", {
+  socket.on("call-ended", ({ to }) => {
+    io.to(to).emit("call-ended", {
       from: socket.id
     });
   });
 
-  socket.on("call:ice-candidate", ({ to, candidate }) => {
-    io.to(to).emit("call:ice-candidate", {
+  socket.on("ice-candidate", ({ to, candidate }) => {
+    io.to(to).emit("ice-candidate", {
       from: socket.id,
       candidate
     });
   });
 
-  socket.on("call:mic-gain", ({ to, gain }) => {
-    io.to(to).emit("call:mic-gain", {
+  socket.on("mic-gain-change", ({ to, gain }) => {
+    io.to(to).emit("mic-gain-change", {
       gain
-    });
-  });
-
-  socket.on("call:media-toggle", ({ to, audioEnabled, videoEnabled }) => {
-    io.to(to).emit("call:media-toggle", {
-      from: socket.id,
-      audioEnabled,
-      videoEnabled
-    });
-  });
-
-  socket.on("call:upgrade-request", ({ to, offer }) => {
-    io.to(to).emit("call:upgrade-request", {
-      from: socket.id,
-      offer
-    });
-  });
-
-  socket.on("call:upgrade-response", ({ to, answer, accepted }) => {
-    io.to(to).emit("call:upgrade-response", {
-      from: socket.id,
-      answer,
-      accepted
     });
   });
 
