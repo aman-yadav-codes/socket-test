@@ -79,33 +79,19 @@ export default function ActiveCallWidget({
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Bind streams reactively when they update
+  // Bind local stream reactively (with guard to avoid resetting frames)
   useEffect(() => {
-    if (localVideoRef.current) {
+    if (localVideoRef.current && localVideoRef.current.srcObject !== localStream) {
       localVideoRef.current.srcObject = localStream;
     }
-  }, [localStream, isVideoEnabled]);
+  }, [localStream]);
 
+  // Bind remote stream reactively (with guard to avoid resetting frames)
   useEffect(() => {
-    if (remoteVideoRef.current) {
+    if (remoteVideoRef.current && remoteVideoRef.current.srcObject !== remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream, isRemoteVideoEnabled]);
-
-  // Callback refs to instantly bind streams on layout shifts
-  const bindLocalVideo = (el: HTMLVideoElement | null) => {
-    localVideoRef.current = el;
-    if (el && localStream) {
-      el.srcObject = localStream;
-    }
-  };
-
-  const bindRemoteVideo = (el: HTMLVideoElement | null) => {
-    remoteVideoRef.current = el;
-    if (el && remoteStream) {
-      el.srcObject = remoteStream;
-    }
-  };
+  }, [remoteStream]);
 
   // Determine signal color
   const getQualityColor = (quality?: CallStats["quality"]) => {
@@ -119,282 +105,222 @@ export default function ActiveCallWidget({
     }
   };
 
-  // 📹 COMPACT VIDEO CALL LAYOUT (WhatsApp-style PIP)
-  if (callType === "video" && !isExpanded) {
+  // 📹 VIDEO CALL LAYOUT (Unified layout swapping smoothly via CSS classes)
+  if (callType === "video") {
     return (
-      <div className="fixed bottom-4 right-4 z-50 w-64 p-3 bg-zinc-905 dark:bg-zinc-900 border border-zinc-700 dark:border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-2.5 animate-slide-in">
-        {/* Header */}
-        <div className="flex items-center justify-between">
+      <div className={`
+        fixed z-50 transition-all duration-300 ease-in-out overflow-hidden shadow-2xl flex flex-col border border-zinc-800 bg-zinc-900
+        ${isExpanded 
+          ? "inset-0 m-4 rounded-3xl" 
+          : "bottom-4 right-4 w-64 p-3 rounded-2xl"
+        }
+      `}>
+        {/* Header Row */}
+        <div className="flex items-center justify-between mb-2">
           <div className="min-w-0 flex-1">
             <p className="text-white font-semibold text-xs truncate leading-tight">{name}</p>
             <p className="text-emerald-400 text-[10px] font-mono tabular-nums leading-none mt-0.5">{duration}</p>
           </div>
-          <button
-            onClick={() => setIsExpanded(true)}
-            className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
-            title="Expand to full screen"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </button>
+          
+          <div className="flex items-center gap-1">
+            {isExpanded && stats && (
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-semibold shadow-md mr-1 ${getQualityColor(stats.quality)}`}>
+                <Wifi className="h-3.5 w-3.5" />
+                <span>{stats.quality}</span>
+              </div>
+            )}
+            
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              title={isExpanded ? "Minimize" : "Maximize"}
+            >
+              {isExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
+            
+            {isExpanded && (
+              <button
+                onClick={() => setShowStatsDetails((v) => !v)}
+                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                title="Connection metrics"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Small PIP remote video preview */}
-        <div className="relative aspect-video w-full bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-inner flex items-center justify-center">
+        {/* Video Canvas Container */}
+        <div className={`relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden rounded-xl ${!isExpanded ? "aspect-video w-full" : ""}`}>
           {isRemoteVideoEnabled && remoteStream ? (
             <video
-              ref={bindRemoteVideo}
+              ref={remoteVideoRef}
               autoPlay
               playsInline
               className="w-full h-full object-cover"
             />
           ) : (
-            <div className="flex flex-col items-center gap-1 text-zinc-650">
-              <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 font-bold text-[10px] border border-zinc-700">
+            <div className="flex flex-col items-center gap-2 text-zinc-600">
+              <div className={`${isExpanded ? 'h-16 w-16 text-xl' : 'h-8 w-8 text-[10px]'} rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 font-bold border border-zinc-700`}>
                 {name[0].toUpperCase()}
               </div>
-              <span className="text-[8px] font-medium italic">Camera off</span>
+              <span className="text-[10px] font-medium italic">Camera off</span>
             </div>
           )}
 
-          {/* Tiny local thumbnail inside the compact preview */}
-          <div className="absolute bottom-1 right-1 w-16 aspect-video bg-zinc-900 border border-zinc-850 rounded-lg overflow-hidden shadow-md">
+          {/* Local Thumbnail PIP (Always mounted, just resized) */}
+          <div className={`
+            absolute border border-zinc-800 rounded-xl overflow-hidden shadow-md z-10 bg-zinc-900 transition-all duration-300
+            ${isExpanded 
+              ? "bottom-4 right-4 w-40 aspect-video" 
+              : "bottom-1 right-1 w-16 aspect-video"
+            }
+          `}>
             {isVideoEnabled && localStream ? (
               <video
-                ref={bindLocalVideo}
+                ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-650">
-                <VideoOff className="h-2.5 w-2.5" />
+              <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-600">
+                <VideoOff className={`${isExpanded ? 'h-4 w-4' : 'h-2.5 w-2.5'}`} />
               </div>
             )}
           </div>
-        </div>
 
-        {/* Quick controls bar */}
-        <div className="flex justify-between items-center gap-2 mt-0.5">
-          <button
-            onClick={onToggleMute}
-            className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
-              isMuted
-                ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
-                : "bg-zinc-800 text-zinc-350 hover:bg-zinc-750"
-            }`}
-            title={isMuted ? "Unmute mic" : "Mute mic"}
-          >
-            {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            onClick={onToggleVideo}
-            className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
-              !isVideoEnabled
-                ? "bg-zinc-800 text-zinc-500 hover:bg-zinc-750"
-                : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
-            }`}
-            title={isVideoEnabled ? "Disable camera" : "Enable camera"}
-          >
-            {isVideoEnabled ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
-          </button>
-          <button
-            onClick={onEndCall}
-            className="p-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white flex-1 flex items-center justify-center cursor-pointer transition-colors"
-            title="Hang up"
-          >
-            <PhoneOff className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // 📹 EXPANDED VIDEO CALL LAYOUT (Full Screen)
-  if (callType === "video" && isExpanded) {
-    return (
-      <>
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/95 backdrop-blur-md p-4 animate-fade-in">
-          <div className="relative w-full max-w-4xl aspect-video bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
-            
-            {/* Header Overlay */}
-            <div className="absolute top-4 left-4 right-4 z-20 flex justify-between items-start pointer-events-none">
-              <div className="bg-zinc-950/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-zinc-800/80 pointer-events-auto flex flex-col gap-0.5">
-                <span className="text-zinc-200 text-sm font-semibold truncate leading-none">{name}</span>
-                <span className="text-emerald-400 font-mono text-xs tabular-nums mt-0.5">{duration}</span>
-              </div>
-
-              {/* Quality & Info Badges */}
-              <div className="flex gap-2 pointer-events-auto items-center">
-                {stats && (
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-semibold shadow-md ${getQualityColor(stats.quality)}`}>
-                    <Wifi className="h-3.5 w-3.5" />
-                    <span>{stats.quality}</span>
-                  </div>
-                )}
-                <button
-                  onClick={() => setIsExpanded(false)}
-                  className="bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl border border-zinc-800/80 text-zinc-350 hover:text-white transition-colors cursor-pointer"
-                  title="Minimize to Picture-in-Picture"
-                >
-                  <Minimize2 className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => setShowStatsDetails((v) => !v)}
-                  className="bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl border border-zinc-800/80 text-zinc-355 hover:text-white transition-colors cursor-pointer"
-                  title="Connection metrics"
-                >
-                  <Info className="h-4 w-4" />
-                </button>
+          {/* Metrics Overlay Panel */}
+          {isExpanded && showStatsDetails && stats && (
+            <div className="absolute top-4 right-4 z-30 w-72 bg-zinc-950/90 backdrop-blur-lg border border-zinc-800 rounded-2xl p-4 text-zinc-300 shadow-2xl flex flex-col gap-2.5 animate-slide-in">
+              <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Metrics</p>
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
+                  <span className="text-[10px] text-zinc-500 block">Ping (RTT)</span>
+                  <span className="text-emerald-400 font-semibold">{stats.rtt}ms</span>
+                </div>
+                <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
+                  <span className="text-[10px] text-zinc-500 block">Jitter</span>
+                  <span className="text-emerald-400 font-semibold">{stats.jitter}ms</span>
+                </div>
+                <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
+                  <span className="text-[10px] text-zinc-500 block">Packet Loss</span>
+                  <span className={`${stats.packetLoss > 2 ? 'text-red-400' : 'text-emerald-400'} font-semibold`}>
+                    {stats.packetLoss}%
+                  </span>
+                </div>
+                <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
+                  <span className="text-[10px] text-zinc-500 block">FPS</span>
+                  <span className="text-emerald-400 font-semibold">{stats.fps} fps</span>
+                </div>
+                <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40 col-span-2">
+                  <span className="text-[10px] text-zinc-500 block">Resolution</span>
+                  <span className="text-emerald-400 font-semibold truncate block">{stats.resolution}</span>
+                </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* Video Streams Container */}
-            <div className="relative flex-1 bg-zinc-950 flex items-center justify-center">
-              
-              {/* REMOTE VIDEO */}
-              {isRemoteVideoEnabled && remoteStream ? (
-                <video
-                  ref={bindRemoteVideo}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
+        {/* Controls Panel */}
+        {isExpanded ? (
+          <div className="border-t border-zinc-805 dark:border-zinc-800 mt-3 pt-3 flex flex-col gap-3">
+            {/* Sliders */}
+            <div className="grid grid-cols-2 gap-4 text-zinc-400 text-[10px] font-medium">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1"><Volume2 className="h-3 w-3" /> Speaker Volume</span>
+                  <span className="font-mono text-emerald-400">{Math.round(speakerVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="2.5"
+                  step="0.05"
+                  value={speakerVolume}
+                  onChange={(e) => onSpeakerVolumeChange(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-500 h-1 rounded bg-zinc-800 appearance-none cursor-pointer"
                 />
-              ) : (
-                <div className="flex flex-col items-center gap-3 text-zinc-555">
-                  <div className="h-20 w-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 font-bold text-2xl animate-pulse shadow-inner">
-                    {name[0].toUpperCase()}
-                  </div>
-                  <p className="text-xs font-medium italic">Camera is off or paused</p>
-                </div>
-              )}
-
-              {/* LOCAL VIDEO (PIP) */}
-              <div className="absolute bottom-4 right-4 w-40 aspect-video bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl z-10">
-                {isVideoEnabled && localStream ? (
-                  <video
-                    ref={bindLocalVideo}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-zinc-900 text-zinc-650">
-                    <VideoOff className="h-4 w-4" />
-                    <span className="text-[10px] uppercase font-semibold tracking-wider">Camera Off</span>
-                  </div>
-                )}
               </div>
-              
-              {/* Network Stats Overlay Panel */}
-              {showStatsDetails && stats && (
-                <div className="absolute top-18 right-4 z-30 w-72 bg-zinc-950/90 backdrop-blur-lg border border-zinc-800 rounded-2xl p-4 text-zinc-300 shadow-2xl flex flex-col gap-2.5 animate-slide-in">
-                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Metrics</p>
-                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                    <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
-                      <span className="text-[10px] text-zinc-500 block">Ping (RTT)</span>
-                      <span className="text-emerald-400 font-semibold">{stats.rtt}ms</span>
-                    </div>
-                    <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
-                      <span className="text-[10px] text-zinc-500 block">Jitter</span>
-                      <span className="text-emerald-400 font-semibold">{stats.jitter}ms</span>
-                    </div>
-                    <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
-                      <span className="text-[10px] text-zinc-500 block">Packet Loss</span>
-                      <span className={`${stats.packetLoss > 2 ? 'text-red-400' : 'text-emerald-400'} font-semibold`}>
-                        {stats.packetLoss}%
-                      </span>
-                    </div>
-                    <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40">
-                      <span className="text-[10px] text-zinc-500 block">FPS</span>
-                      <span className="text-emerald-400 font-semibold">{stats.fps} fps</span>
-                    </div>
-                    <div className="bg-zinc-900/50 p-2 rounded-xl border border-zinc-800/40 col-span-2">
-                      <span className="text-[10px] text-zinc-500 block">Resolution</span>
-                      <span className="text-emerald-400 font-semibold truncate block">{stats.resolution}</span>
-                    </div>
-                  </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1"><Mic className="h-3 w-3" /> Mic Boost</span>
+                  <span className="font-mono text-emerald-400">{Math.round(micGain * 100)}%</span>
                 </div>
-              )}
+                <input
+                  type="range"
+                  min="0"
+                  max="2.5"
+                  step="0.05"
+                  value={micGain}
+                  onChange={(e) => onMicGainChange(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-500 h-1 rounded bg-zinc-800 appearance-none cursor-pointer"
+                />
+              </div>
             </div>
-
-            {/* Controls Bar Overlay */}
-            <div className="bg-zinc-900 border-t border-zinc-800 px-6 py-4 flex flex-col gap-4">
-              
-              {/* Sliders container */}
-              <div className="grid grid-cols-2 gap-6 text-zinc-400 text-xs font-medium">
-                <div className="flex flex-col gap-1 w-full">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5"><Volume2 className="h-3.5 w-3.5" /> Speaker Volume</span>
-                    <span className="font-mono text-emerald-400">{Math.round(speakerVolume * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2.5"
-                    step="0.05"
-                    value={speakerVolume}
-                    onChange={(e) => onSpeakerVolumeChange(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-500 h-1 rounded-lg cursor-pointer bg-zinc-800 appearance-none"
-                  />
-                </div>
-                <div className="flex flex-col gap-1 w-full">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="flex items-center gap-1.5"><Mic className="h-3.5 w-3.5" /> Mic Boost</span>
-                    <span className="font-mono text-emerald-400">{Math.round(micGain * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="2.5"
-                    step="0.05"
-                    value={micGain}
-                    onChange={(e) => onMicGainChange(parseFloat(e.target.value))}
-                    className="w-full accent-emerald-500 h-1 rounded-lg cursor-pointer bg-zinc-800 appearance-none"
-                  />
-                </div>
-              </div>
-
-              {/* Action Buttons Row */}
-              <div className="flex justify-center items-center gap-3">
-                <button
-                  onClick={onToggleMute}
-                  className={`p-3 rounded-2xl flex items-center justify-center transition-colors cursor-pointer shadow-lg ${
-                    isMuted
-                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 hover:bg-yellow-500/30"
-                      : "bg-zinc-800 text-zinc-200 border border-zinc-700 hover:bg-zinc-750"
-                  }`}
-                  aria-label={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-                </button>
-
-                <button
-                  onClick={onToggleVideo}
-                  className={`p-3 rounded-2xl flex items-center justify-center transition-colors cursor-pointer shadow-lg ${
-                    !isVideoEnabled
-                      ? "bg-zinc-800 text-zinc-500 border border-zinc-700 hover:bg-zinc-750"
-                      : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30"
-                  }`}
-                  aria-label={isVideoEnabled ? "Disable Camera" : "Enable Camera"}
-                >
-                  {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-                </button>
-
-                <button
-                  onClick={onEndCall}
-                  className="px-6 py-3 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors flex items-center gap-2 shadow-lg cursor-pointer"
-                  aria-label="End call"
-                >
-                  <PhoneOff className="h-4 w-4" />
-                  <span>Hang Up</span>
-                </button>
-              </div>
+            {/* Buttons */}
+            <div className="flex justify-center items-center gap-3">
+              <button
+                onClick={onToggleMute}
+                className={`p-2.5 rounded-xl flex items-center justify-center transition-colors cursor-pointer shadow-md ${
+                  isMuted
+                    ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30"
+                    : "bg-zinc-800 text-zinc-200 border border-zinc-700 hover:bg-zinc-750"
+                }`}
+              >
+                {isMuted ? <MicOff className="h-4.5 w-4.5" /> : <Mic className="h-4.5 w-4.5" />}
+              </button>
+              <button
+                onClick={onToggleVideo}
+                className={`p-2.5 rounded-xl flex items-center justify-center transition-colors cursor-pointer shadow-md ${
+                  !isVideoEnabled
+                    ? "bg-zinc-850 text-zinc-550 border border-zinc-800 hover:bg-zinc-800"
+                    : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30"
+                }`}
+              >
+                {isVideoEnabled ? <Video className="h-4.5 w-4.5" /> : <VideoOff className="h-4.5 w-4.5" />}
+              </button>
+              <button
+                onClick={onEndCall}
+                className="px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors flex items-center gap-2 shadow-md cursor-pointer text-xs"
+              >
+                <PhoneOff className="h-3.5 w-3.5" />
+                <span>Hang Up</span>
+              </button>
             </div>
           </div>
-        </div>
-      </>
+        ) : (
+          <div className="flex justify-between items-center gap-2 mt-2">
+            <button
+              onClick={onToggleMute}
+              className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
+                isMuted
+                  ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                  : "bg-zinc-800 text-zinc-350 hover:bg-zinc-700"
+              }`}
+            >
+              {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={onToggleVideo}
+              className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
+                !isVideoEnabled
+                  ? "bg-zinc-800 text-zinc-500 hover:bg-zinc-750"
+                  : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+              }`}
+            >
+              {isVideoEnabled ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={onEndCall}
+              className="p-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white flex-1 flex items-center justify-center cursor-pointer transition-colors"
+            >
+              <PhoneOff className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -501,7 +427,7 @@ export default function ActiveCallWidget({
                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                   isMuted
                     ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
-                    : "bg-zinc-750 text-zinc-200 hover:bg-zinc-700"
+                    : "bg-zinc-750 text-zinc-200 hover:bg-zinc-750"
                 }`}
                 aria-label={isMuted ? "Unmute" : "Mute"}
               >
