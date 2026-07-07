@@ -133,6 +133,14 @@ export default function ChatRoom({ username }: Props) {
               callStatus={webrtc.callStatus}
               onCall={webrtc.startCall}
               onEndCall={webrtc.endCall}
+              mode="audio"
+            />
+            <CallButton
+              users={otherUsers}
+              callStatus={webrtc.callStatus}
+              onCall={webrtc.startCall}
+              onEndCall={webrtc.endCall}
+              mode="video"
             />
             <Badge variant={chat.isConnected ? "default" : "destructive"}>
               {chat.isConnected ? "Connected" : "Disconnected"}
