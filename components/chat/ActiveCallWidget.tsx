@@ -49,6 +49,66 @@ export default function ActiveCallWidget({
   const duration = useCallTimer();
   const widgetRef = useRef<HTMLDivElement>(null);
 
+  // Drag states & refs
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const initialPosRef = useRef({ x: 0, y: 0 });
+  const dragDistanceRef = useRef(0);
+
+  const handleDragStart = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    dragStartRef.current = { x: clientX, y: clientY };
+    initialPosRef.current = { ...position };
+    dragDistanceRef.current = 0;
+  };
+
+  const handleDragMove = (clientX: number, clientY: number) => {
+    if (!isDragging) return;
+    const dx = clientX - dragStartRef.current.x;
+    const dy = clientY - dragStartRef.current.y;
+    dragDistanceRef.current = Math.sqrt(dx * dx + dy * dy);
+    
+    setPosition({
+      x: initialPosRef.current.x + dx,
+      y: initialPosRef.current.y + dy,
+    });
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  // Bind drag event listeners to document for fluid high-speed drags
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      handleDragMove(e.clientX, e.clientY);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        handleDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    const onMouseUp = () => handleDragEnd();
+    const onTouchEnd = () => handleDragEnd();
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("touchend", onTouchEnd);
+
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [isDragging, position]);
+
   // Collapse widget on click/tap outside
   useEffect(() => {
     if (!expanded) return;
@@ -61,18 +121,41 @@ export default function ActiveCallWidget({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [expanded]);
 
+  // Distinguish simple tap/click from dragging movements
+  const handleClick = (e: React.MouseEvent) => {
+    if (dragDistanceRef.current > 6) {
+      e.stopPropagation();
+      return;
+    }
+    setExpanded((prev) => !prev);
+  };
+
   return (
     <>
       <div
         ref={widgetRef}
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={handleClick}
+        onMouseDown={(e) => {
+          // Only initiate drag on left mouse click
+          if (e.button === 0) handleDragStart(e.clientX, e.clientY);
+        }}
+        onTouchStart={(e) => {
+          if (e.touches.length === 1) {
+            handleDragStart(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }}
+        style={{
+          transform: `translate(${position.x}px, ${position.y}px)`,
+          touchAction: "none",
+        }}
         className={`
           fixed bottom-4 right-4 z-50
           bg-zinc-900 dark:bg-zinc-800
           border border-zinc-700 dark:border-zinc-600
           rounded-2xl shadow-2xl
-          transition-all duration-300 ease-in-out
-          overflow-hidden cursor-pointer select-none
+          transition-all duration-100 ease-out
+          overflow-hidden select-none
+          ${isDragging ? "cursor-grabbing" : "cursor-grab"}
           ${expanded ? "w-64 p-4" : "w-48 p-3"}
         `}
         tabIndex={0}
