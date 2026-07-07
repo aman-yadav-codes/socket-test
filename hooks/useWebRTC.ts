@@ -215,6 +215,10 @@ export function useWebRTC({
   const ringsCountRef = useRef(0);
   const endCallRef = useRef<(() => void) | null>(null);
 
+  const audioSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioFiltersRef = useRef<BiquadFilterNode[]>([]);
+  const audioTrackStreamRef = useRef<MediaStream | null>(null);
+
   const stopRingbackTone = useCallback(() => {
     if (ringbackIntervalRef.current) {
       clearInterval(ringbackIntervalRef.current);
@@ -346,8 +350,13 @@ export function useWebRTC({
         try {
           const ctx = getAudioContext();
           const audioTrackStream = new MediaStream([e.track]);
+          audioTrackStreamRef.current = audioTrackStream;
+
           const src = ctx.createMediaStreamSource(audioTrackStream);
+          audioSourceNodeRef.current = src;
+
           const gainNode = ctx.createGain();
+          speakerGainNodeRef.current = gainNode;
 
           const lowFilter = ctx.createBiquadFilter();
           lowFilter.type = "lowshelf";
@@ -365,8 +374,7 @@ export function useWebRTC({
           highFilter.frequency.value = 4000;
           highFilter.gain.value = 3;
 
-          gainNode.gain.value = remoteMicGainRef.current;
-          speakerGainNodeRef.current = gainNode;
+          audioFiltersRef.current = [lowFilter, midFilter, highFilter];
 
           src.connect(lowFilter);
           lowFilter.connect(midFilter);
@@ -396,6 +404,9 @@ export function useWebRTC({
     peerRef.current = null;
 
     speakerGainNodeRef.current = null;
+    audioSourceNodeRef.current = null;
+    audioFiltersRef.current = [];
+    audioTrackStreamRef.current = null;
     // We keep the AudioContext alive to preserve the user-gesture running state
   }, []);
 

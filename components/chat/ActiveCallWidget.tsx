@@ -6,7 +6,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Mic, MicOff, PhoneOff, Volume2, Video, VideoOff, Wifi, Info, Check, X, ShieldAlert } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Volume2, Video, VideoOff, Wifi, Info, Check, X, Maximize2, Minimize2 } from "lucide-react";
 import type { CallType, CallStats } from "@/types/call";
 
 interface Props {
@@ -71,26 +71,28 @@ export default function ActiveCallWidget({
   speakerVolume,
   onSpeakerVolumeChange,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false); // default to false (compact PIP!)
+  const [expanded, setExpanded] = useState(false); // audio hover state
   const [showStatsDetails, setShowStatsDetails] = useState(false);
   const duration = useCallTimer();
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Bind local stream to video tag
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+  // Callback refs to instantly bind streams on layout shifts
+  const bindLocalVideo = (el: HTMLVideoElement | null) => {
+    localVideoRef.current = el;
+    if (el && localStream) {
+      el.srcObject = localStream;
     }
-  }, [localStream, isVideoEnabled]);
+  };
 
-  // Bind remote stream to video tag
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+  const bindRemoteVideo = (el: HTMLVideoElement | null) => {
+    remoteVideoRef.current = el;
+    if (el && remoteStream) {
+      el.srcObject = remoteStream;
     }
-  }, [remoteStream, isRemoteVideoEnabled]);
+  };
 
   // Determine signal color
   const getQualityColor = (quality?: CallStats["quality"]) => {
@@ -104,11 +106,102 @@ export default function ActiveCallWidget({
     }
   };
 
-  // 📹 VIDEO CALL LAYOUT
-  if (callType === "video") {
+  // 📹 COMPACT VIDEO CALL LAYOUT (WhatsApp-style PIP)
+  if (callType === "video" && !isExpanded) {
+    return (
+      <div className="fixed bottom-4 right-4 z-50 w-64 p-3 bg-zinc-905 dark:bg-zinc-900 border border-zinc-700 dark:border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-2.5 animate-slide-in">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="text-white font-semibold text-xs truncate leading-tight">{name}</p>
+            <p className="text-emerald-400 text-[10px] font-mono tabular-nums leading-none mt-0.5">{duration}</p>
+          </div>
+          <button
+            onClick={() => setIsExpanded(true)}
+            className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            title="Expand to full screen"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        {/* Small PIP remote video preview */}
+        <div className="relative aspect-video w-full bg-zinc-950 border border-zinc-800 rounded-xl overflow-hidden shadow-inner flex items-center justify-center">
+          {isRemoteVideoEnabled && remoteStream ? (
+            <video
+              ref={bindRemoteVideo}
+              autoPlay
+              playsInline
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-1 text-zinc-650">
+              <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 font-bold text-[10px] border border-zinc-700">
+                {name[0].toUpperCase()}
+              </div>
+              <span className="text-[8px] font-medium italic">Camera off</span>
+            </div>
+          )}
+
+          {/* Tiny local thumbnail inside the compact preview */}
+          <div className="absolute bottom-1 right-1 w-16 aspect-video bg-zinc-900 border border-zinc-850 rounded-lg overflow-hidden shadow-md">
+            {isVideoEnabled && localStream ? (
+              <video
+                ref={bindLocalVideo}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-650">
+                <VideoOff className="h-2.5 w-2.5" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Quick controls bar */}
+        <div className="flex justify-between items-center gap-2 mt-0.5">
+          <button
+            onClick={onToggleMute}
+            className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
+              isMuted
+                ? "bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30"
+                : "bg-zinc-800 text-zinc-350 hover:bg-zinc-750"
+            }`}
+            title={isMuted ? "Unmute mic" : "Mute mic"}
+          >
+            {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={onToggleVideo}
+            className={`p-1.5 rounded-lg flex-1 flex items-center justify-center transition-colors cursor-pointer text-xs ${
+              !isVideoEnabled
+                ? "bg-zinc-800 text-zinc-500 hover:bg-zinc-750"
+                : "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30"
+            }`}
+            title={isVideoEnabled ? "Disable camera" : "Enable camera"}
+          >
+            {isVideoEnabled ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={onEndCall}
+            className="p-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white flex-1 flex items-center justify-center cursor-pointer transition-colors"
+            title="Hang up"
+          >
+            <PhoneOff className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 📹 EXPANDED VIDEO CALL LAYOUT (Full Screen)
+  if (callType === "video" && isExpanded) {
     return (
       <>
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/90 backdrop-blur-md p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/95 backdrop-blur-md p-4 animate-fade-in">
           <div className="relative w-full max-w-4xl aspect-video bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col">
             
             {/* Header Overlay */}
@@ -119,7 +212,7 @@ export default function ActiveCallWidget({
               </div>
 
               {/* Quality & Info Badges */}
-              <div className="flex gap-2 pointer-events-auto">
+              <div className="flex gap-2 pointer-events-auto items-center">
                 {stats && (
                   <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-semibold shadow-md ${getQualityColor(stats.quality)}`}>
                     <Wifi className="h-3.5 w-3.5" />
@@ -127,8 +220,15 @@ export default function ActiveCallWidget({
                   </div>
                 )}
                 <button
+                  onClick={() => setIsExpanded(false)}
+                  className="bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl border border-zinc-800/80 text-zinc-350 hover:text-white transition-colors cursor-pointer"
+                  title="Minimize to Picture-in-Picture"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                </button>
+                <button
                   onClick={() => setShowStatsDetails((v) => !v)}
-                  className="bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl border border-zinc-800/80 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+                  className="bg-zinc-950/80 backdrop-blur-md p-2 rounded-2xl border border-zinc-800/80 text-zinc-355 hover:text-white transition-colors cursor-pointer"
                   title="Connection metrics"
                 >
                   <Info className="h-4 w-4" />
@@ -142,13 +242,13 @@ export default function ActiveCallWidget({
               {/* REMOTE VIDEO */}
               {isRemoteVideoEnabled && remoteStream ? (
                 <video
-                  ref={remoteVideoRef}
+                  ref={bindRemoteVideo}
                   autoPlay
                   playsInline
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="flex flex-col items-center gap-3 text-zinc-500">
+                <div className="flex flex-col items-center gap-3 text-zinc-555">
                   <div className="h-20 w-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 font-bold text-2xl animate-pulse shadow-inner">
                     {name[0].toUpperCase()}
                   </div>
@@ -160,16 +260,16 @@ export default function ActiveCallWidget({
               <div className="absolute bottom-4 right-4 w-40 aspect-video bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl z-10">
                 {isVideoEnabled && localStream ? (
                   <video
-                    ref={localVideoRef}
+                    ref={bindLocalVideo}
                     autoPlay
                     playsInline
                     muted
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-zinc-900 text-zinc-600">
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-zinc-900 text-zinc-650">
                     <VideoOff className="h-4 w-4" />
-                    <span className="text-[10px] uppercase font-semibold tracking-wider font-sans">Camera Off</span>
+                    <span className="text-[10px] uppercase font-semibold tracking-wider">Camera Off</span>
                   </div>
                 )}
               </div>
