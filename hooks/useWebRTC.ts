@@ -543,6 +543,9 @@ export function useWebRTC({ socket, socketId, username, connectedUsers }: UseWeb
 
     const onCallRejected = () => {
       playDisconnectBeep();
+      sessionStorage.setItem("last_call_username", callTargetNameRef.current);
+      sessionStorage.setItem("last_call_timestamp", Date.now().toString());
+      sessionStorage.setItem("last_call_reason", "declined");
       cleanup();
     };
 

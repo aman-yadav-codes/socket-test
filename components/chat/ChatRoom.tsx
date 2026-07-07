@@ -194,8 +194,20 @@ export default function ChatRoom({ username }: Props) {
           isOnline={!!otherUsers.find((u) => u.username === reconnectTarget)}
           onReconnect={handleReconnect}
           onDismiss={handleDismissReconnect}
-          title={callReason === "no_answer" ? "No Answer" : "Call Disconnected"}
-          message={callReason === "no_answer" ? `${reconnectTarget} hasn't picked up the call. Wanna reconnect?` : undefined}
+          title={
+            callReason === "no_answer"
+              ? "No Answer"
+              : callReason === "declined"
+              ? "Call Declined"
+              : "Call Disconnected"
+          }
+          message={
+            callReason === "no_answer"
+              ? `${reconnectTarget} hasn't picked up the call. Wanna reconnect?`
+              : callReason === "declined"
+              ? `${reconnectTarget} declined the call. Wanna reconnect?`
+              : undefined
+          }
         />
       )}
     </div>

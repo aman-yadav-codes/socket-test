@@ -51,17 +51,34 @@ export default function ActiveCallWidget({
   return (
     <>
       <div
-        onMouseEnter={() => setExpanded(true)}
-        onMouseLeave={() => setExpanded(false)}
-        onFocus={() => setExpanded(true)}
-        onBlur={() => setExpanded(false)}
+        onClick={() => setExpanded((prev) => !prev)}
+        onMouseEnter={() => {
+          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+            setExpanded(true);
+          }
+        }}
+        onMouseLeave={() => {
+          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+            setExpanded(false);
+          }
+        }}
+        onFocus={() => {
+          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+            setExpanded(true);
+          }
+        }}
+        onBlur={() => {
+          if (typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches) {
+            setExpanded(false);
+          }
+        }}
         className={`
           fixed bottom-4 right-4 z-50
           bg-zinc-900 dark:bg-zinc-800
           border border-zinc-700 dark:border-zinc-600
           rounded-2xl shadow-2xl
           transition-all duration-300 ease-in-out
-          overflow-hidden cursor-pointer
+          overflow-hidden cursor-pointer select-none
           ${expanded ? "w-64 p-4" : "w-48 p-3"}
         `}
         tabIndex={0}
