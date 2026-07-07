@@ -345,7 +345,8 @@ export function useWebRTC({
       if (e.track.kind === "audio") {
         try {
           const ctx = getAudioContext();
-          const src = ctx.createMediaStreamSource(rStream);
+          const audioTrackStream = new MediaStream([e.track]);
+          const src = ctx.createMediaStreamSource(audioTrackStream);
           const gainNode = ctx.createGain();
 
           const lowFilter = ctx.createBiquadFilter();
@@ -395,10 +396,7 @@ export function useWebRTC({
     peerRef.current = null;
 
     speakerGainNodeRef.current = null;
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
+    // We keep the AudioContext alive to preserve the user-gesture running state
   }, []);
 
   const cleanup = useCallback(() => {
@@ -430,6 +428,7 @@ export function useWebRTC({
     if (!socket || callStatus !== "idle") return;
 
     try {
+      getAudioContext();
       closeActiveConnection();
       setCallType(type);
 
@@ -470,6 +469,7 @@ export function useWebRTC({
     ringtoneRef.current?.pause();
 
     try {
+      getAudioContext();
       closeActiveConnection();
       const type = incomingCall.callType;
       setCallType(type);
