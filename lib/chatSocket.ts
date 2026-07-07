@@ -11,6 +11,12 @@ export interface ServerToClientEvents {
   "message-history": (history: ChatMessage[]) => void;
   "receive-message": (msg: ChatMessage) => void;
   "users-update":    (users: ChatUser[]) => void;
+  
+  // Typing
+  "typing-update": (data: { username: string; isTyping: boolean; room: string }) => void;
+  
+  // Receipts
+  "message-status-update": (data: { messageId: string; status: "sent" | "delivered" | "read"; room: string }) => void;
 
   // WebRTC signaling (received)
   "incoming-call": (data: { from: string; fromUsername: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
@@ -25,6 +31,16 @@ export interface ClientToServerEvents {
   // Chat
   "send-message": (text: string) => void;
   "get-users":    () => void;
+  
+  // Rooms
+  "join-room":    (roomName: string) => void;
+  
+  // Typing
+  "typing":       (isTyping: boolean) => void;
+  
+  // Receipts
+  "message-delivered": (data: { messageId: string; senderName: string; room: string }) => void;
+  "message-read":      (data: { messageId: string; senderName: string; room: string }) => void;
 
   // WebRTC signaling (sent)
   "call-user":     (data: { to: string; offer: RTCSessionDescriptionInit; isReconnect?: boolean }) => void;
@@ -39,11 +55,10 @@ export type ChatSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 // ── Factory ─────────────────────────────────────────────────────────────────
 
-export function createChatSocket(username: string): ChatSocket {
-  return io({
-    path: "/api/socket",
-    addTrailingSlash: false,
-    query: { username },
+export function createChatSocket(token: string): ChatSocket {
+  const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+  return io(socketUrl, {
+    auth: { token },
     transports: ["websocket"],
   });
 }

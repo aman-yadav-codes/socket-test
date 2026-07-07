@@ -12,4 +12,6 @@ export interface ChatMessage {
   text: string;
   sender: string;
   timestamp: string;
+  room?: string;
+  status?: "sent" | "delivered" | "read";
 }

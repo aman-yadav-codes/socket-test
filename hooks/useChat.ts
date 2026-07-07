@@ -39,6 +39,14 @@ export interface UseChatReturn {
   // Users
   connectedUsers: ChatUser[];
 
+  // Rooms
+  room: string;
+  joinRoom: (roomName: string) => void;
+
+  // Typing
+  typingUsers: string[];
+  sendTypingStatus: (isTyping: boolean) => void;
+
   // Input
   input: string;
   setInput: (v: string) => void;
@@ -68,6 +76,11 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
   const [socket, setSocket] = useState<ChatSocket | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [isToastVisible, setIsToastVisible] = useState(false);
+
+  // New States
+  const [room, setRoom] = useState("general");
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [token, setToken] = useState<string | null>(null);
 
   const socketRef = useRef<ChatSocket | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
@@ -121,37 +134,89 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
     const el = messageRefs.current.get(id);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Trigger highlight: remove → force reflow → re-add
     el.classList.remove("animate-highlight");
     void el.offsetHeight; // reflow
     el.classList.add("animate-highlight");
-    // Clean up class after animation
     el.addEventListener("animationend", () => el.classList.remove("animate-highlight"), { once: true });
   }, []);
 
-  // Socket lifecycle — recreates when username changes
+  // Fetch JWT token when username changes
   useEffect(() => {
-    if (!username) return;
+    if (!username) {
+      setToken(null);
+      return;
+    }
 
-    const socket = createChatSocket(username);
+    const cachedToken = sessionStorage.getItem(`chat_token_${username}`);
+    if (cachedToken) {
+      setToken(cachedToken);
+      return;
+    }
+
+    let active = true;
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+    console.log(`[auth] Fetching JWT for ${username} from ${socketUrl}`);
+
+    fetch(`${socketUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Auth request failed");
+        return res.json();
+      })
+      .then((data) => {
+        if (active && data.token) {
+          sessionStorage.setItem(`chat_token_${username}`, data.token);
+          setToken(data.token);
+        }
+      })
+      .catch((err) => {
+        console.error("[auth] Token fetch error:", err);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [username]);
+
+  // Socket lifecycle — recreates when token or room changes
+  useEffect(() => {
+    if (!token || !username) return;
+
+    const socket = createChatSocket(token);
     socketRef.current = socket;
     setSocket(socket);
 
     socket.on("connect", () => {
       setIsConnected(true);
       setSocketId(socket.id ?? "");
+      socket.emit("join-room", room);
       socket.emit("get-users");
     });
 
-    socket.on("disconnect", () => setIsConnected(false));
+    socket.on("disconnect", () => {
+      setIsConnected(false);
+      setTypingUsers([]);
+    });
 
     socket.on("message-history", (history) => {
       setMessages(history);
+      
+      // Send read receipts for historical messages sent by others
+      history.forEach((msg) => {
+        if (msg.sender !== username && msg.status !== "read") {
+          socket.emit("message-read", { messageId: msg.id, senderName: msg.sender, room });
+        }
+      });
     });
 
     socket.on("receive-message", (msg) => {
+      if (msg.room && msg.room !== room) return; // Ignore if message is for another room
+      
       setMessages((prev) => {
-        // Replace optimistic placeholder from same sender with the canonical server copy
+        // Replace optimistic placeholder from same sender with canonical server copy
         const idx = prev.findIndex(
           (m) =>
             m.id?.startsWith("optimistic-") &&
@@ -167,11 +232,31 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
         return [...prev, msg];
       });
 
-      // Notify only for other users' messages
+      // Send receipts for messages from other users
       if (msg.sender !== username) {
+        socket.emit("message-delivered", { messageId: msg.id, senderName: msg.sender, room: msg.room || "general" });
+        socket.emit("message-read", { messageId: msg.id, senderName: msg.sender, room: msg.room || "general" });
         playSound();
         showToast({ text: `${msg.sender}: ${msg.text}`, messageId: msg.id });
       }
+    });
+
+    socket.on("message-status-update", ({ messageId, status }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, status } : m))
+      );
+    });
+
+    socket.on("typing-update", ({ username: typingUser, isTyping, room: typingRoom }) => {
+      if (typingRoom !== room) return;
+      setTypingUsers((prev) => {
+        if (isTyping) {
+          if (prev.includes(typingUser)) return prev;
+          return [...prev, typingUser];
+        } else {
+          return prev.filter((u) => u !== typingUser);
+        }
+      });
     });
 
     socket.on("users-update", setConnectedUsers);
@@ -179,6 +264,7 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
     if (socket.connected) {
       setIsConnected(true);
       setSocketId(socket.id ?? "");
+      socket.emit("join-room", room);
       socket.emit("get-users");
     }
 
@@ -186,8 +272,25 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
       socket.disconnect();
       socketRef.current = null;
       setSocket(null);
+      setTypingUsers([]);
     };
-  }, [username, playSound, showToast]);
+  }, [token, username, room, playSound, showToast]);
+
+  const joinRoom = useCallback((roomName: string) => {
+    if (!roomName || roomName === room) return;
+    setRoom(roomName);
+    setTypingUsers([]);
+    setMessages([]);
+    if (socketRef.current) {
+      socketRef.current.emit("join-room", roomName);
+    }
+  }, [room]);
+
+  const sendTypingStatus = useCallback((isTyping: boolean) => {
+    if (socketRef.current) {
+      socketRef.current.emit("typing", isTyping);
+    }
+  }, []);
 
   const sendMessage = useCallback(() => {
     const trimmed = input.trim();
@@ -198,13 +301,16 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
       text: trimmed,
       sender: username,
       timestamp: new Date().toISOString(),
+      room: room,
+      status: "sent"
     };
 
     setMessages((prev) => [...prev, optimistic]);
     socketRef.current.emit("send-message", trimmed);
+    socketRef.current.emit("typing", false);
     playSound();
     setInput("");
-  }, [input, username, playSound]);
+  }, [input, username, room, playSound]);
 
   const toggleSound = useCallback(() => setSoundEnabled((v) => !v), []);
 
@@ -216,6 +322,10 @@ export function useChat({ username }: UseChatOptions): UseChatReturn {
     messageRefs,
     scrollToMessage,
     connectedUsers,
+    room,
+    joinRoom,
+    typingUsers,
+    sendTypingStatus,
     input,
     setInput,
     sendMessage,

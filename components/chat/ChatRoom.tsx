@@ -86,6 +86,8 @@ export default function ChatRoom({ username }: Props) {
   // Filter out self from list of potential call recipients
   const otherUsers = chat.connectedUsers.filter((u) => u.id !== chat.socketId);
 
+  const ROOMS = ["general", "gaming", "random", "webrtc-dev"];
+
   const handleReconnect = () => {
     if (!reconnectTarget) return;
     const targetUser = otherUsers.find((u) => u.username === reconnectTarget);
@@ -130,6 +132,23 @@ export default function ChatRoom({ username }: Props) {
 
         {/* Body */}
         <CardContent className="pt-4 flex flex-col gap-3">
+          {/* Room Selector */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none select-none">
+            {ROOMS.map((r) => (
+              <button
+                key={r}
+                onClick={() => chat.joinRoom(r)}
+                className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer ${
+                  chat.room === r
+                    ? "bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100"
+                    : "bg-transparent text-zinc-500 border-zinc-200 hover:text-zinc-900 hover:border-zinc-400 dark:border-zinc-800 dark:hover:text-zinc-100 dark:hover:border-zinc-600"
+                }`}
+              >
+                #{r}
+              </button>
+            ))}
+          </div>
+
           <UserList users={chat.connectedUsers} socketId={chat.socketId} />
           <MessageList
             messages={chat.messages}
@@ -139,12 +158,21 @@ export default function ChatRoom({ username }: Props) {
         </CardContent>
 
         {/* Footer */}
-        <CardFooter>
+        <CardFooter className="flex flex-col items-start gap-1">
+          {/* Typing Indicator */}
+          <div className="h-4 w-full flex items-center px-1">
+            {chat.typingUsers.length > 0 && (
+              <span className="text-[11px] text-zinc-400 dark:text-zinc-500 italic animate-pulse">
+                {chat.typingUsers.join(", ")} {chat.typingUsers.length === 1 ? "is" : "are"} typing...
+              </span>
+            )}
+          </div>
           <ChatInput
             value={chat.input}
             onChange={chat.setInput}
             onSend={chat.sendMessage}
             disabled={!chat.isConnected}
+            onTyping={chat.sendTypingStatus}
           />
         </CardFooter>
       </Card>

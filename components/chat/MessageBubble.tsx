@@ -31,12 +31,25 @@ const MessageBubble = forwardRef<HTMLDivElement, Props>(({ message, isSelf }, re
         </span>
       )}
       <span className="break-words leading-relaxed">{message.text}</span>
-      <span className="text-[9px] text-zinc-400 self-end mt-0.5 tabular-nums">
-        {new Date(message.timestamp).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </span>
+      <div className="flex items-center gap-1 self-end mt-0.5 select-none">
+        <span className="text-[9px] text-zinc-400 tabular-nums">
+          {new Date(message.timestamp).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+        {isSelf && (
+          <span className="text-[10px] font-bold leading-none select-none">
+            {message.status === "read" ? (
+              <span className="text-blue-500 dark:text-blue-400">✓✓</span>
+            ) : message.status === "delivered" ? (
+              <span className="text-zinc-400 dark:text-zinc-500">✓✓</span>
+            ) : (
+              <span className="text-zinc-400 dark:text-zinc-500">✓</span>
+            )}
+          </span>
+        )}
+      </div>
     </div>
   );
 });
