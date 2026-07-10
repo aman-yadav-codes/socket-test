@@ -22,8 +22,15 @@ if (-not $?) {
     Exit 1
 }
 
-# 2. Transfer the package to VM
-Write-Host "[2/5] Uploading package to remote server ($REMOTE_HOST)..." -ForegroundColor Yellow
+# 2. Pre-cleanup remote server
+Write-Host "[2/6] Cleaning up old directories and PM2 processes on remote server..." -ForegroundColor Yellow
+ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "pm2 delete socket-server || true; rm -rf $SERVER_DIR socketsdk-server server.tar.gz $TAR_NAME"
+if (-not $?) {
+    Write-Warning "Cleanup step encountered errors or was not fully completed, proceeding anyway..."
+}
+
+# 3. Transfer the package to VM
+Write-Host "[3/6] Uploading package to remote server ($REMOTE_HOST)..." -ForegroundColor Yellow
 scp -i $SSH_KEY -o StrictHostKeyChecking=no $TAR_NAME "${REMOTE_USER}@${REMOTE_HOST}:/home/ubuntu/"
 if (-not $?) {
     Write-Error "Failed to upload package via SCP."
@@ -31,8 +38,8 @@ if (-not $?) {
     Exit 1
 }
 
-# 3. Extract and configure remote server
-Write-Host "[3/5] Extracting package on remote server..." -ForegroundColor Yellow
+# 4. Extract and configure remote server
+Write-Host "[4/6] Extracting package on remote server..." -ForegroundColor Yellow
 ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p $SERVER_DIR && tar -xzf $TAR_NAME -C $SERVER_DIR && rm $TAR_NAME"
 if (-not $?) {
     Write-Error "Failed to extract package on remote host."
@@ -40,8 +47,8 @@ if (-not $?) {
     Exit 1
 }
 
-# 4. Install dependencies and compile TypeScript
-Write-Host "[4/5] Running npm install and building server on remote host..." -ForegroundColor Yellow
+# 5. Install dependencies and compile TypeScript
+Write-Host "[5/6] Running npm install and building server on remote host..." -ForegroundColor Yellow
 ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "cd $SERVER_DIR && npm install && npm run build"
 if (-not $?) {
     Write-Error "Build failed on remote host."
@@ -49,23 +56,23 @@ if (-not $?) {
     Exit 1
 }
 
-# 5. Restart server on PM2
-Write-Host "[5/5] Restarting server via PM2..." -ForegroundColor Yellow
-ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "cd $SERVER_DIR && (pm2 restart socket-server || pm2 start dist/server.js --name socket-server)"
+# 6. Start server on PM2
+Write-Host "[6/6] Starting server via PM2..." -ForegroundColor Yellow
+ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "cd $SERVER_DIR && pm2 start dist/server.js --name socket-server"
 if (-not $?) {
-    Write-Error "Failed to restart process under PM2."
+    Write-Error "Failed to start process under PM2."
     Remove-Item $TAR_NAME -Force
     Exit 1
 }
 
-# 6. Cleanup local package
+# 7. Cleanup local package
 Write-Host "Cleaning up local temporary package archive..." -ForegroundColor Yellow
 Remove-Item $TAR_NAME -Force
 
-# 7. Check health status
-Write-Host "Checking remote server health status..." -ForegroundColor Green
+# 8. Check health status
+Write-Host "Checking remote server health status (via SSH)..." -ForegroundColor Green
 Start-Sleep -Seconds 2
-Invoke-RestMethod -Uri "http://${REMOTE_HOST}:3001/api/health" -Method Get
+ssh -i $SSH_KEY -o StrictHostKeyChecking=no "${REMOTE_USER}@${REMOTE_HOST}" "curl -s http://localhost:3001/api/health"
 
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host "Deployment Completed Successfully!" -ForegroundColor Green
